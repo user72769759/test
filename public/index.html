@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>모아두기</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <!-- 로그인 화면 -->
+  <section id="auth" class="auth hidden">
+    <form id="auth-form" class="card">
+      <h1>모아두기</h1>
+      <p class="muted">글, 사진, 영상, 음악을 주제별로 한곳에.</p>
+      <input id="email" type="email" placeholder="이메일" required autocomplete="email" />
+      <input id="password" type="password" placeholder="비밀번호 (6자 이상)" required minlength="6" autocomplete="current-password" />
+      <div class="row">
+        <button type="submit" data-mode="signin">로그인</button>
+        <button type="submit" data-mode="signup" class="ghost">회원가입</button>
+      </div>
+      <p id="auth-msg" class="muted small"></p>
+    </form>
+  </section>
+
+  <!-- 메인 화면 -->
+  <section id="app" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand">모아두기</div>
+      <button id="new-folder" class="ghost small-btn">+ 새 폴더</button>
+      <nav id="tree"></nav>
+      <div class="sidebar-foot">
+        <span id="user-email" class="muted small"></span>
+        <button id="signout" class="ghost small-btn">로그아웃</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div id="crumbs" class="crumbs"></div>
+        <div class="row">
+          <button id="add-note" class="ghost">글 쓰기</button>
+          <button id="add-link" class="ghost">링크 저장</button>
+          <label class="btn">파일 올리기
+            <input id="file-input" type="file" multiple accept="image/*,video/*,audio/*,.pdf,.txt" hidden />
+          </label>
+        </div>
+      </header>
+      <div id="drop" class="drop">여기에 파일을 끌어다 놓으세요</div>
+      <div id="grid" class="grid"></div>
+      <p id="empty" class="muted center hidden">아직 저장된 항목이 없어요.</p>
+    </main>
+  </section>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

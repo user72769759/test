@@ -1,0 +1,10 @@
+{
+  // Cloudflare Workers 설정 — public/ 폴더를 정적 사이트로 배포
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "test",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "single-page-application"
+  }
+}
