@@ -29,12 +29,54 @@
       <button id="new-folder" class="ghost small-btn">+ 새 폴더</button>
       <nav id="tree"></nav>
       <div class="sidebar-foot">
-        <span id="user-email" class="muted small"></span>
+        <button id="open-settings" class="profile-btn" title="계정 설정">
+          <span class="avatar" id="side-avatar"></span>
+          <span id="side-name" class="small"></span>
+        </button>
         <button id="signout" class="ghost small-btn">로그아웃</button>
       </div>
     </aside>
 
     <main class="main">
+      <!-- 계정 설정 -->
+      <div id="settings" class="settings hidden">
+        <header class="topbar"><div class="crumbs">계정 설정</div>
+          <button id="close-settings" class="ghost">← 보관함으로</button></header>
+
+        <section class="panel">
+          <h2>프로필 사진</h2>
+          <div class="row">
+            <span class="avatar avatar-lg" id="set-avatar"></span>
+            <div class="row wrap">
+              <label class="btn">사진 변경
+                <input id="avatar-input" type="file" accept="image/jpeg,image/png,image/webp" hidden />
+              </label>
+              <button id="avatar-remove" class="ghost">사진 삭제</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>이름</h2>
+          <form id="name-form" class="row">
+            <input id="name-input" maxlength="30" placeholder="표시할 이름" />
+            <button type="submit">저장</button>
+          </form>
+          <p class="muted small">이메일: <span id="set-email"></span></p>
+        </section>
+
+        <section class="panel danger">
+          <h2>계정 삭제</h2>
+          <p class="small">계정과 저장한 모든 글·사진·영상·폴더가 영구적으로 삭제되며 되돌릴 수 없어요.</p>
+          <form id="delete-form" class="row">
+            <input id="delete-confirm" placeholder="확인을 위해 '삭제'를 입력" />
+            <button type="submit" class="danger-btn">계정 영구 삭제</button>
+          </form>
+        </section>
+        <p id="settings-msg" class="muted small"></p>
+      </div>
+
+      <div id="library">
       <header class="topbar">
         <div id="crumbs" class="crumbs"></div>
         <div class="row">
@@ -50,6 +92,7 @@
       <div id="drop" class="drop">여기에 파일을 끌어다 놓으세요 · '전체'나 '미분류'에서 올리면 AI가 주제별 폴더로 자동 정리해요</div>
       <div id="grid" class="grid"></div>
       <p id="empty" class="muted center hidden">아직 저장된 항목이 없어요.</p>
+      </div>
     </main>
   </section>
 

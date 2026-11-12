@@ -44,7 +44,12 @@ sb.auth.onAuthStateChange((_event, session) => {
   state.user = session?.user ?? null;
   $("auth").classList.toggle("hidden", !!state.user);
   $("app").classList.toggle("hidden", !state.user);
-  if (state.user) { $("user-email").textContent = state.user.email; loadAll(); }
+  if (!state.user) { state.loaded = false; return; }
+  // Supabase 권장: 콜백 안에서 바로 다른 Supabase 호출을 기다리지 않도록 다음 틱으로 미룸
+  setTimeout(() => {
+    renderProfile();
+    if (!state.loaded) { state.loaded = true; showSettings(false); loadAll(); }
+  }, 0);
 });
 
 // ---------- 폴더 (계층 구조) ----------
@@ -112,14 +117,14 @@ function select(id) {
 }
 
 // ---------- AI 자동 분류 ----------
-// 사진을 640px JPEG로 줄여서 AI에 보냄 (전송량·비용 절감)
-async function makeThumb(src) {
+// 사진을 작은 JPEG로 줄임 (AI 전송·프로필 사진용)
+async function makeThumb(src, maxSize = 640) {
   const url = typeof src === "string" ? src : URL.createObjectURL(src);
   try {
     const img = new Image();
     img.crossOrigin = "anonymous";
     await new Promise((ok, fail) => { img.onload = ok; img.onerror = fail; img.src = url; });
-    const scale = Math.min(1, 640 / Math.max(img.naturalWidth, img.naturalHeight));
+    const scale = Math.min(1, maxSize / Math.max(img.naturalWidth, img.naturalHeight));
     const c = document.createElement("canvas");
     c.width = Math.round(img.naturalWidth * scale);
     c.height = Math.round(img.naturalHeight * scale);
@@ -302,3 +307,112 @@ drop.ondragleave = () => drop.classList.remove("over");
 drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); uploadFiles([...e.dataTransfer.files]); };
 
 async function loadAll() { await loadFolders(); select(state.current); }
+
+// ---------- 계정 설정 ----------
+const meta = () => state.user?.user_metadata ?? {};
+const displayName = () => meta().name || state.user?.email?.split("@")[0] || "";
+const say = (t) => ($("settings-msg").textContent = t);
+
+async function avatarUrl() {
+  const p = meta().avatar_path;
+  if (!p) return null;
+  const { data } = await sb.storage.from("avatars").createSignedUrl(p, 3600);
+  return data?.signedUrl ?? null;
+}
+function paintAvatar(node, url) {
+  node.style.backgroundImage = url ? `url("${url}")` : "";
+  node.textContent = url ? "" : (displayName()[0] || "?").toUpperCase();
+}
+async function renderProfile() {
+  $("side-name").textContent = displayName();
+  $("set-email").textContent = state.user.email;
+  $("name-input").value = meta().name || "";
+  const url = await avatarUrl();
+  paintAvatar($("side-avatar"), url);
+  paintAvatar($("set-avatar"), url);
+}
+function showSettings(on) {
+  $("settings").classList.toggle("hidden", !on);
+  $("library").classList.toggle("hidden", on);
+  $("delete-confirm").value = "";
+  say("");
+}
+$("open-settings").onclick = () => showSettings(true);
+$("close-settings").onclick = () => showSettings(false);
+
+// 이름 변경 (로그인 계정 정보 user_metadata.name 에 저장)
+$("name-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const name = $("name-input").value.trim();
+  const { data, error } = await sb.auth.updateUser({ data: { name } });
+  if (error) return say(error.message);
+  state.user = data.user;
+  renderProfile();
+  say("이름을 저장했어요.");
+};
+
+// 프로필 사진 변경 (256px로 줄여 avatars 저장소에 올림)
+$("avatar-input").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  say("사진 올리는 중…");
+  const dataUrl = await makeThumb(file, 256);
+  if (!dataUrl) return say("이미지를 읽을 수 없어요.");
+  const blob = await (await fetch(dataUrl)).blob();
+  const path = `${state.user.id}/${Date.now()}.jpg`;
+  const { error: upErr } = await sb.storage.from("avatars").upload(path, blob, { contentType: "image/jpeg" });
+  if (upErr) return say(upErr.message);
+  const old = meta().avatar_path;
+  const { data, error } = await sb.auth.updateUser({ data: { avatar_path: path } });
+  if (error) return say(error.message);
+  if (old) await sb.storage.from("avatars").remove([old]);
+  state.user = data.user;
+  await renderProfile();
+  say("프로필 사진을 바꿨어요.");
+};
+
+$("avatar-remove").onclick = async () => {
+  const old = meta().avatar_path;
+  if (!old) return say("등록된 사진이 없어요.");
+  const { data, error } = await sb.auth.updateUser({ data: { avatar_path: null } });
+  if (error) return say(error.message);
+  await sb.storage.from("avatars").remove([old]);
+  state.user = data.user;
+  renderProfile();
+  say("프로필 사진을 삭제했어요.");
+};
+
+// 계정 삭제: 내 파일 전부 삭제 → DB 함수로 계정 삭제(폴더·항목 자동 삭제) → 로그아웃
+async function removeAllFiles(bucket) {
+  const prefix = state.user.id;
+  for (let round = 0; round < 50; round++) {
+    const { data, error } = await sb.storage.from(bucket).list(prefix, { limit: 1000 });
+    if (error) throw error;
+    if (!data.length) return;
+    const { error: rmErr } = await sb.storage.from(bucket).remove(data.map((f) => `${prefix}/${f.name}`));
+    if (rmErr) throw rmErr;
+  }
+  throw new Error("파일을 모두 지우지 못했어요.");
+}
+
+$("delete-form").onsubmit = async (e) => {
+  e.preventDefault();
+  if ($("delete-confirm").value.trim() !== "삭제") return say("'삭제'를 정확히 입력해 주세요.");
+  if (!confirm("정말 계정과 모든 데이터를 영구 삭제할까요? 되돌릴 수 없어요.")) return;
+  const btn = e.submitter;
+  btn.disabled = true;
+  say("삭제 중…");
+  try {
+    await removeAllFiles("uploads");
+    await removeAllFiles("avatars");
+    const { error } = await sb.rpc("delete_my_account");
+    if (error) throw error;
+    await sb.auth.signOut({ scope: "local" });
+    alert("계정이 삭제됐어요. 이용해 주셔서 감사합니다.");
+  } catch (err) {
+    say("삭제 실패: " + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+};
