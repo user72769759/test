@@ -4,7 +4,11 @@ import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = (id) => document.getElementById(id);
 
-const state = { user: null, folders: [], current: null }; // current: 선택한 폴더 id (null = 전체 최상위)
+// current: null = 전체(모든 항목), "inbox" = 미분류(폴더 없음), 그 외 = 폴더 id
+const state = { user: null, folders: [], current: null };
+// 새 항목이 들어갈 폴더 (전체/미분류 화면에서는 폴더 없음 → AI 자동 분류 대상)
+const targetFolder = () => (state.current === null || state.current === "inbox" ? null : state.current);
+const folderName = (id) => state.folders.find((f) => f.id === id)?.name;
 
 // ---------- 공통 ----------
 function el(tag, props = {}, ...children) {
@@ -60,9 +64,11 @@ function pathTo(id) {
 function renderTree() {
   const tree = $("tree");
   tree.replaceChildren();
-  const root = el("div", { className: "node" + (state.current === null ? " active" : ""), textContent: "📥 전체" });
+  const root = el("div", { className: "node" + (state.current === null ? " active" : ""), textContent: "🗂 전체" });
   root.onclick = () => select(null);
-  tree.append(root);
+  const inbox = el("div", { className: "node" + (state.current === "inbox" ? " active" : ""), textContent: "📥 미분류" });
+  inbox.onclick = () => select("inbox");
+  tree.append(root, inbox);
   const walk = (parentId, depth) => {
     for (const f of childrenOf(parentId)) {
       const add = el("button", { className: "add", title: "하위 폴더", textContent: "+" });
@@ -83,6 +89,7 @@ function renderCrumbs() {
   const home = el("a", { textContent: "전체" });
   home.onclick = () => select(null);
   c.append(home);
+  if (state.current === "inbox") c.append(" / 미분류");
   for (const f of pathTo(state.current)) {
     const a = el("a", { textContent: f.name });
     a.onclick = () => select(f.id);
@@ -90,18 +97,17 @@ function renderCrumbs() {
   }
 }
 
-async function createFolder(parentId = state.current) {
+async function createFolder(parentId = targetFolder()) {
   const name = prompt("폴더 이름");
   if (!name?.trim()) return;
   const { error } = await sb.from("folders").insert({ name: name.trim(), parent_id: parentId });
   if (error) return alert(error.message);
   await loadFolders(); renderTree();
 }
-$("new-folder").onclick = () => createFolder(state.current);
+$("new-folder").onclick = () => createFolder(targetFolder());
 
 function select(id) {
   state.current = id;
-  $("auto-classify").classList.toggle("hidden", id !== null);
   renderTree(); renderCrumbs(); loadItems();
 }
 
@@ -172,10 +178,18 @@ async function classifyMany(pairs) {
   loadItems();
 }
 
+// 전체·미분류 화면: 폴더 없는 항목을 정리 / 폴더 화면: 그 폴더의 항목을 주제별 폴더로 다시 정리
 $("auto-classify").onclick = async () => {
-  const { data, error } = await sb.from("items").select("*").is("folder_id", null);
+  const folder = targetFolder();
+  let q = sb.from("items").select("*");
+  q = folder ? q.eq("folder_id", folder) : q.is("folder_id", null);
+  const { data, error } = await q;
   if (error) return alert(error.message);
-  if (!data.length) return alert("'전체'에 정리할 항목이 없어요.");
+  if (!data.length) {
+    return alert(folder ? "이 폴더에 정리할 항목이 없어요."
+      : "미분류 항목이 없어요. 폴더 안 항목을 다시 정리하려면 그 폴더를 열고 눌러주세요.");
+  }
+  if (folder && !confirm(`'${folderName(folder)}' 폴더의 ${data.length}개 항목을 AI가 주제별 폴더로 옮겨요. 진행할까요?`)) return;
   const paths = data.filter((i) => i.kind === "image" && i.file_path).map((i) => i.file_path);
   const urls = {};
   if (paths.length) {
@@ -188,7 +202,8 @@ $("auto-classify").onclick = async () => {
 // ---------- 항목 ----------
 async function loadItems() {
   let q = sb.from("items").select("*").order("created_at", { ascending: false });
-  q = state.current === null ? q.is("folder_id", null) : q.eq("folder_id", state.current);
+  if (state.current === "inbox") q = q.is("folder_id", null);
+  else if (state.current !== null) q = q.eq("folder_id", state.current);
   const { data, error } = await q;
   if (error) return alert(error.message);
 
@@ -227,7 +242,7 @@ function renderItems(items, urls) {
         titleNode,
         it.body ? el("div", { className: "text", textContent: it.body }) : null,
         el("div", { className: "meta" },
-          el("span", { className: "tag", textContent: KIND_LABEL[it.kind] }),
+          el("span", { className: "tag", textContent: KIND_LABEL[it.kind] + (state.current === null ? " · " + (folderName(it.folder_id) ?? "미분류") : "") }),
           el("span", { textContent: new Date(it.created_at).toLocaleDateString("ko-KR") }),
           del)));
     grid.append(card);
@@ -246,9 +261,9 @@ $("add-note").onclick = async () => {
   const title = prompt("제목");
   if (title === null) return;
   const body = prompt("내용") ?? "";
-  const { data, error } = await sb.from("items").insert({ kind: "note", title, body, folder_id: state.current }).select().single();
+  const { data, error } = await sb.from("items").insert({ kind: "note", title, body, folder_id: targetFolder() }).select().single();
   if (error) return alert(error.message);
-  if (state.current === null) classifyMany([{ item: data }]);
+  if (targetFolder() === null) classifyMany([{ item: data }]);
   else loadItems();
 };
 
@@ -256,9 +271,9 @@ $("add-link").onclick = async () => {
   const url = prompt("저장할 링크 (https://…)");
   if (!url || !/^https?:\/\//.test(url)) return url && alert("http:// 또는 https:// 로 시작하는 주소를 넣어주세요.");
   const title = prompt("제목 (비워도 돼요)") ?? "";
-  const { data, error } = await sb.from("items").insert({ kind: "link", url, title: title || url, folder_id: state.current }).select().single();
+  const { data, error } = await sb.from("items").insert({ kind: "link", url, title: title || url, folder_id: targetFolder() }).select().single();
   if (error) return alert(error.message);
-  if (state.current === null) classifyMany([{ item: data }]);
+  if (targetFolder() === null) classifyMany([{ item: data }]);
   else loadItems();
 };
 
@@ -270,13 +285,13 @@ async function uploadFiles(files) {
     const { error: upErr } = await sb.storage.from("uploads").upload(path, file, { contentType: file.type });
     if (upErr) { alert(`${file.name}: ${upErr.message}`); continue; }
     const { data, error } = await sb.from("items").insert({
-      kind: kindFromMime(file.type || ""), title: file.name, file_path: path, folder_id: state.current,
+      kind: kindFromMime(file.type || ""), title: file.name, file_path: path, folder_id: targetFolder(),
     }).select().single();
     if (error) alert(error.message);
     else added.push({ item: data, imageSrc: file });
   }
-  // '전체'에 올린 경우에만 자동 분류 (특정 폴더에 올리면 그대로 둠)
-  if (state.current === null && added.length) { loadItems(); classifyMany(added); }
+  // 전체·미분류에 올린 경우에만 자동 분류 (특정 폴더에 올리면 그대로 둠)
+  if (targetFolder() === null && added.length) { loadItems(); classifyMany(added); }
   else loadItems();
 }
 $("file-input").onchange = (e) => { uploadFiles([...e.target.files]); e.target.value = ""; };
