@@ -99,7 +99,91 @@ async function createFolder(parentId = state.current) {
 }
 $("new-folder").onclick = () => createFolder(state.current);
 
-function select(id) { state.current = id; renderTree(); renderCrumbs(); loadItems(); }
+function select(id) {
+  state.current = id;
+  $("auto-classify").classList.toggle("hidden", id !== null);
+  renderTree(); renderCrumbs(); loadItems();
+}
+
+// ---------- AI 자동 분류 ----------
+// 사진을 640px JPEG로 줄여서 AI에 보냄 (전송량·비용 절감)
+async function makeThumb(src) {
+  const url = typeof src === "string" ? src : URL.createObjectURL(src);
+  try {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    await new Promise((ok, fail) => { img.onload = ok; img.onerror = fail; img.src = url; });
+    const scale = Math.min(1, 640 / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement("canvas");
+    c.width = Math.round(img.naturalWidth * scale);
+    c.height = Math.round(img.naturalHeight * scale);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", 0.8);
+  } catch {
+    return null; // 이미지를 못 읽으면 파일명만으로 분류
+  } finally {
+    if (typeof src !== "string") URL.revokeObjectURL(url);
+  }
+}
+
+async function classifyItem(item, imageSrc) {
+  const image = item.kind === "image" && imageSrc ? await makeThumb(imageSrc) : null;
+  const topics = childrenOf(null).map((f) => f.name);
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch("/api/classify", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify({ kind: item.kind, title: item.title, body: item.body, url: item.url, image, topics }),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+
+  let folder = childrenOf(null).find((f) => f.name === out.topic);
+  if (!folder) {
+    const { data, error } = await sb.from("folders").insert({ name: out.topic, parent_id: null }).select().single();
+    if (error) throw error;
+    folder = data;
+    state.folders.push(data);
+  }
+  const { error } = await sb.from("items").update({ folder_id: folder.id }).eq("id", item.id);
+  if (error) throw error;
+  return out.topic;
+}
+
+// pairs: [{ item, imageSrc }] — 하나씩 순서대로 분류
+async function classifyMany(pairs) {
+  const status = $("ai-status");
+  const btn = $("auto-classify");
+  btn.disabled = true;
+  let done = 0, failed = 0, lastError = "";
+  for (const { item, imageSrc } of pairs) {
+    status.textContent = `✨ 분류 중… ${done + failed + 1}/${pairs.length}`;
+    try { await classifyItem(item, imageSrc); done++; }
+    catch (e) { console.error(e); lastError = e.message; failed++; }
+    renderTree();
+  }
+  status.textContent = failed
+    ? `${done}개 정리 · ${failed}개 실패 (${lastError})`
+    : `✨ ${done}개를 주제별로 정리했어요`;
+  setTimeout(() => (status.textContent = ""), failed ? 10000 : 5000);
+  btn.disabled = false;
+  await loadFolders();
+  renderTree();
+  loadItems();
+}
+
+$("auto-classify").onclick = async () => {
+  const { data, error } = await sb.from("items").select("*").is("folder_id", null);
+  if (error) return alert(error.message);
+  if (!data.length) return alert("'전체'에 정리할 항목이 없어요.");
+  const paths = data.filter((i) => i.kind === "image" && i.file_path).map((i) => i.file_path);
+  const urls = {};
+  if (paths.length) {
+    const { data: signed } = await sb.storage.from("uploads").createSignedUrls(paths, 600);
+    for (const s of signed ?? []) urls[s.path] = s.signedUrl;
+  }
+  classifyMany(data.map((item) => ({ item, imageSrc: urls[item.file_path] })));
+};
 
 // ---------- 항목 ----------
 async function loadItems() {
@@ -162,32 +246,38 @@ $("add-note").onclick = async () => {
   const title = prompt("제목");
   if (title === null) return;
   const body = prompt("내용") ?? "";
-  const { error } = await sb.from("items").insert({ kind: "note", title, body, folder_id: state.current });
+  const { data, error } = await sb.from("items").insert({ kind: "note", title, body, folder_id: state.current }).select().single();
   if (error) return alert(error.message);
-  loadItems();
+  if (state.current === null) classifyMany([{ item: data }]);
+  else loadItems();
 };
 
 $("add-link").onclick = async () => {
   const url = prompt("저장할 링크 (https://…)");
   if (!url || !/^https?:\/\//.test(url)) return url && alert("http:// 또는 https:// 로 시작하는 주소를 넣어주세요.");
   const title = prompt("제목 (비워도 돼요)") ?? "";
-  const { error } = await sb.from("items").insert({ kind: "link", url, title: title || url, folder_id: state.current });
+  const { data, error } = await sb.from("items").insert({ kind: "link", url, title: title || url, folder_id: state.current }).select().single();
   if (error) return alert(error.message);
-  loadItems();
+  if (state.current === null) classifyMany([{ item: data }]);
+  else loadItems();
 };
 
 async function uploadFiles(files) {
+  const added = [];
   for (const file of files) {
     const ext = file.name.includes(".") ? file.name.split(".").pop() : "bin";
     const path = `${state.user.id}/${crypto.randomUUID()}.${ext}`;
     const { error: upErr } = await sb.storage.from("uploads").upload(path, file, { contentType: file.type });
     if (upErr) { alert(`${file.name}: ${upErr.message}`); continue; }
-    const { error } = await sb.from("items").insert({
+    const { data, error } = await sb.from("items").insert({
       kind: kindFromMime(file.type || ""), title: file.name, file_path: path, folder_id: state.current,
-    });
+    }).select().single();
     if (error) alert(error.message);
+    else added.push({ item: data, imageSrc: file });
   }
-  loadItems();
+  // '전체'에 올린 경우에만 자동 분류 (특정 폴더에 올리면 그대로 둠)
+  if (state.current === null && added.length) { loadItems(); classifyMany(added); }
+  else loadItems();
 }
 $("file-input").onchange = (e) => { uploadFiles([...e.target.files]); e.target.value = ""; };
 

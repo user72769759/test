@@ -1,10 +1,21 @@
 {
-  // Cloudflare Workers 설정 — public/ 폴더를 정적 사이트로 배포
+  // Cloudflare Workers 설정
+  // - public/ : 정적 사이트
+  // - src/index.js : /api/* 요청 처리 (AI 자동 분류)
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "test",
+  "main": "src/index.js",
   "compatibility_date": "2026-11-01",
   "assets": {
     "directory": "./public",
-    "not_found_handling": "single-page-application"
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "ai": { "binding": "AI" },
+  "vars": {
+    // 공개용 값 (public/config.js와 동일)
+    "SUPABASE_URL": "https://rhzrrkxagvdaqncukwbr.supabase.co",
+    "SUPABASE_KEY": "sb_publishable_oTa2-CTAJMvH2eu2zwRoLw_P3VWvdq3"
   }
 }
