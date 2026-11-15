@@ -79,8 +79,11 @@
       <div id="library">
       <header class="topbar">
         <div id="crumbs" class="crumbs"></div>
-        <div class="row">
-          <span id="ai-status" class="muted small"></span>
+        <div id="trash-actions" class="row hidden">
+          <span class="muted small">휴지통의 항목은 영구 삭제하기 전까지 복원할 수 있어요</span>
+          <button id="empty-trash" class="danger-btn">휴지통 비우기</button>
+        </div>
+        <div id="lib-actions" class="row">
           <button id="auto-classify" class="ghost" title="미분류 항목(폴더 화면에서는 그 폴더의 항목)을 AI가 주제별 폴더로 정리">✨ 자동 분류</button>
           <button id="add-note" class="ghost">글 쓰기</button>
           <button id="add-link" class="ghost">링크 저장</button>
@@ -95,6 +98,34 @@
       </div>
     </main>
   </section>
+
+  <!-- 업로드·분류 진행 상황 -->
+  <div id="progress" class="progress hidden" role="status" aria-live="polite">
+    <div class="progress-head"><span id="progress-spin" class="spinner"></span><span id="progress-label"></span></div>
+    <div id="progress-sub" class="small muted"></div>
+    <div class="bar"><div id="progress-fill" class="bar-fill"></div></div>
+  </div>
+
+  <!-- 알림 (되돌리기 등) -->
+  <div id="toast" class="toast hidden"><span id="toast-msg"></span><button id="toast-action" class="ghost small-btn hidden"></button></div>
+
+  <!-- 사진 슬라이드쇼 -->
+  <div id="viewer" class="viewer hidden" role="dialog" aria-modal="true" aria-label="사진 보기">
+    <button id="v-close" class="v-btn v-close" aria-label="닫기 (Esc)">✕</button>
+    <button id="v-prev" class="v-btn v-prev" aria-label="이전 사진 (←)">‹</button>
+    <div class="v-stage"><img id="v-img" alt="" /></div>
+    <button id="v-next" class="v-btn v-next" aria-label="다음 사진 (→)">›</button>
+    <div class="v-bar">
+      <div class="v-info"><div id="v-title" class="v-title"></div><div id="v-sub" class="small"></div></div>
+      <div class="row wrap">
+        <label class="v-move" id="v-move-wrap">폴더 이동
+          <select id="v-folder"></select>
+        </label>
+        <button id="v-restore" class="ghost v-light hidden">복원</button>
+        <button id="v-delete" class="danger-btn">휴지통으로</button>
+      </div>
+    </div>
+  </div>
 
   <script type="module" src="/app.js"></script>
 </body>

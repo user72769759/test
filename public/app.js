@@ -4,10 +4,11 @@ import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = (id) => document.getElementById(id);
 
-// current: null = 전체(모든 항목), "inbox" = 미분류(폴더 없음), 그 외 = 폴더 id
-const state = { user: null, folders: [], current: null };
+// current: null = 전체(모든 항목), "inbox" = 미분류(폴더 없음), "trash" = 휴지통, 그 외 = 폴더 id
+const state = { user: null, folders: [], current: null, items: [], urls: {} };
+const inTrash = () => state.current === "trash";
 // 새 항목이 들어갈 폴더 (전체/미분류 화면에서는 폴더 없음 → AI 자동 분류 대상)
-const targetFolder = () => (state.current === null || state.current === "inbox" ? null : state.current);
+const targetFolder = () => (state.current === null || state.current === "inbox" || inTrash() ? null : state.current);
 const folderName = (id) => state.folders.find((f) => f.id === id)?.name;
 
 // ---------- 공통 ----------
@@ -86,6 +87,9 @@ function renderTree() {
     }
   };
   walk(null, 0);
+  const trash = el("div", { className: "node trash-node" + (inTrash() ? " active" : ""), textContent: "🗑 휴지통" });
+  trash.onclick = () => select("trash");
+  tree.append(trash);
 }
 
 function renderCrumbs() {
@@ -95,6 +99,7 @@ function renderCrumbs() {
   home.onclick = () => select(null);
   c.append(home);
   if (state.current === "inbox") c.append(" / 미분류");
+  if (inTrash()) c.append(" / 휴지통");
   for (const f of pathTo(state.current)) {
     const a = el("a", { textContent: f.name });
     a.onclick = () => select(f.id);
@@ -113,6 +118,9 @@ $("new-folder").onclick = () => createFolder(targetFolder());
 
 function select(id) {
   state.current = id;
+  $("lib-actions").classList.toggle("hidden", inTrash());
+  $("drop").classList.toggle("hidden", inTrash());
+  $("trash-actions").classList.toggle("hidden", !inTrash());
   renderTree(); renderCrumbs(); loadItems();
 }
 
@@ -163,20 +171,19 @@ async function classifyItem(item, imageSrc) {
 
 // pairs: [{ item, imageSrc }] — 하나씩 순서대로 분류
 async function classifyMany(pairs) {
-  const status = $("ai-status");
   const btn = $("auto-classify");
   btn.disabled = true;
   let done = 0, failed = 0, lastError = "";
   for (const { item, imageSrc } of pairs) {
-    status.textContent = `✨ 분류 중… ${done + failed + 1}/${pairs.length}`;
+    const n = done + failed;
+    progress.show(`✨ AI가 분류 중 ${n + 1}/${pairs.length}`, item.title, n / pairs.length);
     try { await classifyItem(item, imageSrc); done++; }
     catch (e) { console.error(e); lastError = e.message; failed++; }
     renderTree();
   }
-  status.textContent = failed
+  progress.done(failed
     ? `${done}개 정리 · ${failed}개 실패 (${lastError})`
-    : `✨ ${done}개를 주제별로 정리했어요`;
-  setTimeout(() => (status.textContent = ""), failed ? 10000 : 5000);
+    : `✨ ${done}개를 주제별로 정리했어요`, !!failed);
   btn.disabled = false;
   await loadFolders();
   renderTree();
@@ -186,7 +193,7 @@ async function classifyMany(pairs) {
 // 전체·미분류 화면: 폴더 없는 항목을 정리 / 폴더 화면: 그 폴더의 항목을 주제별 폴더로 다시 정리
 $("auto-classify").onclick = async () => {
   const folder = targetFolder();
-  let q = sb.from("items").select("*");
+  let q = sb.from("items").select("*").is("deleted_at", null);
   q = folder ? q.eq("folder_id", folder) : q.is("folder_id", null);
   const { data, error } = await q;
   if (error) return alert(error.message);
@@ -206,9 +213,13 @@ $("auto-classify").onclick = async () => {
 
 // ---------- 항목 ----------
 async function loadItems() {
-  let q = sb.from("items").select("*").order("created_at", { ascending: false });
-  if (state.current === "inbox") q = q.is("folder_id", null);
-  else if (state.current !== null) q = q.eq("folder_id", state.current);
+  let q = sb.from("items").select("*");
+  if (inTrash()) q = q.not("deleted_at", "is", null).order("deleted_at", { ascending: false });
+  else {
+    q = q.is("deleted_at", null).order("created_at", { ascending: false });
+    if (state.current === "inbox") q = q.is("folder_id", null);
+    else if (state.current !== null) q = q.eq("folder_id", state.current);
+  }
   const { data, error } = await q;
   if (error) return alert(error.message);
 
@@ -219,6 +230,8 @@ async function loadItems() {
     const { data: signed } = await sb.storage.from("uploads").createSignedUrls(paths, 3600);
     for (const s of signed ?? []) urls[s.path] = s.signedUrl;
   }
+  state.items = data;
+  state.urls = urls;
   renderItems(data, urls);
 }
 
@@ -226,6 +239,7 @@ function renderItems(items, urls) {
   const grid = $("grid");
   grid.replaceChildren();
   $("empty").classList.toggle("hidden", items.length > 0);
+  $("empty").textContent = inTrash() ? "휴지통이 비어 있어요." : "아직 저장된 항목이 없어요.";
   for (const it of items) {
     const src = it.file_path ? urls[it.file_path] : null;
     let media = null;
@@ -239,8 +253,15 @@ function renderItems(items, urls) {
       titleNode = el("a", { className: "title", href, target: "_blank", rel: "noopener", textContent: it.title || it.url });
     }
 
-    const del = el("button", { textContent: "삭제" });
-    del.onclick = () => removeItem(it);
+    // 버튼: 일반 화면은 '삭제'(휴지통으로), 휴지통 화면은 '복원'·'영구 삭제'
+    const btn = (label, fn) => {
+      const b = el("button", { textContent: label });
+      b.onclick = (e) => { e.stopPropagation(); fn(); };
+      return b;
+    };
+    const actions = inTrash()
+      ? el("span", { className: "row" }, btn("복원", () => restoreItems([it])), btn("영구 삭제", () => purgeWithConfirm([it])))
+      : btn("삭제", () => moveToTrash(it));
     // 사진: 정사각형에 꽉 채우고, 파일명·정보는 마우스를 올리면(모바일은 탭하면) 위에 표시
     const isPhoto = it.kind === "image" && src;
     const card = el("article", { className: "item" + (isPhoto ? " photo" : ""), tabIndex: isPhoto ? 0 : -1 },
@@ -250,19 +271,65 @@ function renderItems(items, urls) {
         it.body ? el("div", { className: "text", textContent: it.body }) : null,
         el("div", { className: "meta" },
           el("span", { className: "tag", textContent: KIND_LABEL[it.kind] + (state.current === null ? " · " + (folderName(it.folder_id) ?? "미분류") : "") }),
-          el("span", { textContent: new Date(it.created_at).toLocaleDateString("ko-KR") }),
-          del)));
+          el("span", { textContent: new Date(inTrash() ? it.deleted_at : it.created_at).toLocaleDateString("ko-KR") + (inTrash() ? " 삭제" : "") }),
+          actions)));
+    if (isPhoto) {
+      card.onclick = (e) => { if (!e.target.closest("a, button")) openViewer(it.id); };
+      card.onkeydown = (e) => { if (e.key === "Enter") openViewer(it.id); };
+    }
     grid.append(card);
   }
 }
 
-async function removeItem(it) {
-  if (!confirm("이 항목을 삭제할까요?")) return;
-  if (it.file_path) await sb.storage.from("uploads").remove([it.file_path]);
-  const { error } = await sb.from("items").delete().eq("id", it.id);
-  if (error) return alert(error.message);
-  loadItems();
+// ---------- 휴지통 ----------
+async function moveToTrash(it, { reload = true } = {}) {
+  const { error } = await sb.from("items").update({ deleted_at: new Date().toISOString() }).eq("id", it.id);
+  if (error) { alert(error.message); return false; }
+  toast("휴지통으로 옮겼어요", "되돌리기", async () => {
+    await sb.from("items").update({ deleted_at: null }).eq("id", it.id);
+    loadItems();
+  });
+  if (reload) loadItems();
+  return true;
 }
+
+async function restoreItems(items, { reload = true } = {}) {
+  const { error } = await sb.from("items").update({ deleted_at: null }).in("id", items.map((i) => i.id));
+  if (error) { alert(error.message); return false; }
+  toast(`${items.length}개를 복원했어요`);
+  if (reload) loadItems();
+  return true;
+}
+
+// 영구 삭제: 저장소 파일 → DB 행 순서로 지움
+async function purgeItems(items) {
+  const paths = items.map((i) => i.file_path).filter(Boolean);
+  for (let k = 0; k < paths.length; k += 500) {
+    const { error } = await sb.storage.from("uploads").remove(paths.slice(k, k + 500));
+    if (error) throw error;
+  }
+  const ids = items.map((i) => i.id);
+  for (let k = 0; k < ids.length; k += 500) {
+    const { error } = await sb.from("items").delete().in("id", ids.slice(k, k + 500));
+    if (error) throw error;
+  }
+}
+
+async function purgeWithConfirm(items, { reload = true } = {}) {
+  const msg = items.length === 1 ? "이 항목을 영구 삭제할까요? 되돌릴 수 없어요." : `${items.length}개 항목을 영구 삭제할까요? 되돌릴 수 없어요.`;
+  if (!confirm(msg)) return false;
+  try { await purgeItems(items); } catch (e) { alert("삭제 실패: " + e.message); return false; }
+  toast(`${items.length}개를 영구 삭제했어요`);
+  if (reload) loadItems();
+  return true;
+}
+
+$("empty-trash").onclick = async () => {
+  const { data, error } = await sb.from("items").select("id, file_path").not("deleted_at", "is", null);
+  if (error) return alert(error.message);
+  if (!data.length) return toast("휴지통이 이미 비어 있어요");
+  purgeWithConfirm(data);
+};
 
 $("add-note").onclick = async () => {
   const title = prompt("제목");
@@ -284,21 +351,57 @@ $("add-link").onclick = async () => {
   else loadItems();
 };
 
+// supabase-js 업로드는 진행률을 알려주지 않아서, 같은 저장소 API를 XHR로 직접 호출
+async function uploadWithProgress(path, file, onProgress) {
+  const { data: { session } } = await sb.auth.getSession();
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${SUPABASE_URL}/storage/v1/object/uploads/${path}`);
+    xhr.setRequestHeader("authorization", `Bearer ${session.access_token}`);
+    xhr.setRequestHeader("apikey", SUPABASE_KEY);
+    xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
+    xhr.setRequestHeader("x-upsert", "false");
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    xhr.onload = () => {
+      if (xhr.status < 300) return resolve();
+      let msg = `HTTP ${xhr.status}`;
+      try { msg = JSON.parse(xhr.responseText).message || msg; } catch {}
+      reject(new Error(msg));
+    };
+    xhr.onerror = () => reject(new Error("네트워크 오류"));
+    xhr.send(file);
+  });
+}
+
 async function uploadFiles(files) {
+  if (!files.length) return;
+  const folderId = targetFolder(); // 업로드 도중 화면을 옮겨도 처음 위치에 저장
   const added = [];
-  for (const file of files) {
-    const ext = file.name.includes(".") ? file.name.split(".").pop() : "bin";
+  const failed = [];
+  const totalBytes = files.reduce((s, f) => s + f.size, 0) || 1;
+  let doneBytes = 0;
+  for (const [n, file] of files.entries()) {
+    const label = `업로드 중 ${n + 1}/${files.length}`;
+    progress.show(label, file.name, doneBytes / totalBytes);
+    const ext = (file.name.includes(".") ? file.name.split(".").pop() : "bin").replace(/[^a-z0-9]/gi, "").slice(0, 10) || "bin";
     const path = `${state.user.id}/${crypto.randomUUID()}.${ext}`;
-    const { error: upErr } = await sb.storage.from("uploads").upload(path, file, { contentType: file.type });
-    if (upErr) { alert(`${file.name}: ${upErr.message}`); continue; }
-    const { data, error } = await sb.from("items").insert({
-      kind: kindFromMime(file.type || ""), title: file.name, file_path: path, folder_id: targetFolder(),
-    }).select().single();
-    if (error) alert(error.message);
-    else added.push({ item: data, imageSrc: file });
+    try {
+      await uploadWithProgress(path, file, (f) => progress.show(label, file.name, (doneBytes + f * file.size) / totalBytes));
+      const { data, error } = await sb.from("items").insert({
+        kind: kindFromMime(file.type || ""), title: file.name, file_path: path, folder_id: folderId,
+      }).select().single();
+      if (error) throw error;
+      added.push({ item: data, imageSrc: file });
+    } catch (e) {
+      console.error(e);
+      failed.push(`${file.name} (${e.message})`);
+    }
+    doneBytes += file.size;
   }
+  if (failed.length) progress.done(`${added.length}개 업로드 · ${failed.length}개 실패: ${failed[0]}`, true);
+  else progress.done(`${added.length}개 업로드 완료`);
   // 전체·미분류에 올린 경우에만 자동 분류 (특정 폴더에 올리면 그대로 둠)
-  if (targetFolder() === null && added.length) { loadItems(); classifyMany(added); }
+  if (folderId === null && added.length) { loadItems(); classifyMany(added); }
   else loadItems();
 }
 $("file-input").onchange = (e) => { uploadFiles([...e.target.files]); e.target.value = ""; };
@@ -418,3 +521,151 @@ $("delete-form").onsubmit = async (e) => {
     btn.disabled = false;
   }
 };
+
+// ---------- 진행 상황 패널 (업로드·AI 분류 공용) ----------
+const progress = {
+  timer: null,
+  show(label, sub = "", fraction = null) {
+    clearTimeout(this.timer);
+    $("progress").classList.remove("hidden", "done", "error");
+    $("progress-label").textContent = label;
+    $("progress-sub").textContent = sub;
+    const fill = $("progress-fill");
+    fill.classList.toggle("indeterminate", fraction === null);
+    if (fraction !== null) fill.style.width = Math.round(Math.min(1, fraction) * 100) + "%";
+  },
+  done(label, isError = false) {
+    $("progress").classList.add(isError ? "error" : "done");
+    $("progress-label").textContent = label;
+    $("progress-sub").textContent = "";
+    $("progress-fill").classList.remove("indeterminate");
+    $("progress-fill").style.width = "100%";
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => $("progress").classList.add("hidden"), isError ? 10000 : 3000);
+  },
+};
+
+// ---------- 알림 ----------
+let toastTimer;
+function toast(msg, actionLabel, action) {
+  clearTimeout(toastTimer);
+  $("toast-msg").textContent = msg;
+  const btn = $("toast-action");
+  btn.classList.toggle("hidden", !actionLabel);
+  btn.textContent = actionLabel || "";
+  btn.onclick = async () => { $("toast").classList.add("hidden"); await action(); };
+  $("toast").classList.remove("hidden");
+  toastTimer = setTimeout(() => $("toast").classList.add("hidden"), 5000);
+}
+
+// ---------- 사진 슬라이드쇼 ----------
+const viewer = { list: [], i: 0, dirty: false };
+const isViewerOpen = () => !$("viewer").classList.contains("hidden");
+
+function folderOptions() {
+  const out = [["", "📥 미분류"]];
+  const walk = (pid, depth) => {
+    for (const f of childrenOf(pid)) { out.push([f.id, "　".repeat(depth) + "📁 " + f.name]); walk(f.id, depth + 1); }
+  };
+  walk(null, 0);
+  return out;
+}
+
+function openViewer(id) {
+  viewer.list = state.items.filter((i) => i.kind === "image" && state.urls[i.file_path]);
+  viewer.i = Math.max(0, viewer.list.findIndex((x) => x.id === id));
+  viewer.dirty = false;
+  $("viewer").classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+  $("v-move-wrap").classList.toggle("hidden", inTrash());
+  $("v-restore").classList.toggle("hidden", !inTrash());
+  $("v-delete").textContent = inTrash() ? "영구 삭제" : "휴지통으로";
+  showSlide();
+  $("v-close").focus();
+}
+
+function closeViewer() {
+  $("viewer").classList.add("hidden");
+  $("v-img").removeAttribute("src");
+  document.body.style.overflow = "";
+  if (viewer.dirty) loadItems();
+}
+
+function showSlide() {
+  if (!viewer.list.length) return closeViewer();
+  viewer.i = Math.min(Math.max(viewer.i, 0), viewer.list.length - 1);
+  const it = viewer.list[viewer.i];
+  $("v-img").src = state.urls[it.file_path];
+  $("v-img").alt = it.title;
+  $("v-title").textContent = it.title || "(제목 없음)";
+  $("v-sub").textContent = `${viewer.i + 1} / ${viewer.list.length} · ${new Date(it.created_at).toLocaleDateString("ko-KR")}`;
+  const sel = $("v-folder");
+  sel.replaceChildren(...folderOptions().map(([v, t]) => el("option", { value: v, textContent: t })));
+  sel.value = it.folder_id ?? "";
+  $("v-prev").disabled = viewer.i === 0;
+  $("v-next").disabled = viewer.i === viewer.list.length - 1;
+  // 앞뒤 사진 미리 불러오기
+  for (const j of [viewer.i - 1, viewer.i + 1]) {
+    const n = viewer.list[j];
+    if (n) new Image().src = state.urls[n.file_path];
+  }
+}
+
+const step = (d) => { viewer.i += d; showSlide(); };
+$("v-prev").onclick = () => step(-1);
+$("v-next").onclick = () => step(1);
+$("v-close").onclick = closeViewer;
+$("viewer").onclick = (e) => { if (e.target.id === "viewer" || e.target.classList.contains("v-stage")) closeViewer(); };
+
+// 지금 보는 화면에서 빠지는 사진이면 슬라이드에서도 제외
+function dropCurrentIfGone(it) {
+  const stays = state.current === null || (state.current === "inbox" ? it.folder_id === null : state.current === it.folder_id);
+  if (!stays) viewer.list.splice(viewer.i, 1);
+  showSlide();
+}
+
+$("v-folder").onchange = async (e) => {
+  const it = viewer.list[viewer.i];
+  const folder_id = e.target.value || null;
+  const { error } = await sb.from("items").update({ folder_id }).eq("id", it.id);
+  if (error) return alert(error.message);
+  it.folder_id = folder_id;
+  viewer.dirty = true;
+  toast(`'${folderName(folder_id) ?? "미분류"}'(으)로 옮겼어요`);
+  e.target.blur(); // 방향키가 다시 사진 넘기기로 동작하도록
+  dropCurrentIfGone(it);
+};
+
+$("v-delete").onclick = async () => {
+  const it = viewer.list[viewer.i];
+  const ok = inTrash() ? await purgeWithConfirm([it], { reload: false }) : await moveToTrash(it, { reload: false });
+  if (!ok) return;
+  viewer.dirty = true;
+  viewer.list.splice(viewer.i, 1);
+  showSlide();
+};
+
+$("v-restore").onclick = async () => {
+  const it = viewer.list[viewer.i];
+  if (!(await restoreItems([it], { reload: false }))) return;
+  viewer.dirty = true;
+  viewer.list.splice(viewer.i, 1);
+  showSlide();
+};
+
+document.addEventListener("keydown", (e) => {
+  if (!isViewerOpen() || e.target.tagName === "SELECT") return;
+  if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); step(1); }
+  else if (e.key === "Escape") closeViewer();
+});
+
+// 휴대폰: 좌우로 밀어서 넘기기
+let touchX = null;
+$("viewer").addEventListener("touchstart", (e) => { touchX = e.touches[0].clientX; }, { passive: true });
+$("viewer").addEventListener("touchend", (e) => {
+  if (touchX === null) return;
+  const dx = e.changedTouches[0].clientX - touchX;
+  touchX = null;
+  if (Math.abs(dx) > 50) step(dx > 0 ? -1 : 1);
+});
