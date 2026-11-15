@@ -75,18 +75,14 @@ function renderTree() {
   const inbox = el("div", { className: "node" + (state.current === "inbox" ? " active" : ""), textContent: "📥 미분류" });
   inbox.onclick = () => select("inbox");
   tree.append(root, inbox);
-  const walk = (parentId, depth) => {
-    for (const f of childrenOf(parentId)) {
-      const add = el("button", { className: "add", title: "하위 폴더", textContent: "+" });
-      add.onclick = (e) => { e.stopPropagation(); createFolder(f.id); };
-      const node = el("div", { className: "node" + (state.current === f.id ? " active" : "") }, el("span", { textContent: "📁 " + f.name }), add);
-      node.style.paddingLeft = 6 + depth * 14 + "px";
-      node.onclick = () => select(f.id);
-      tree.append(node);
-      walk(f.id, depth + 1);
-    }
-  };
-  walk(null, 0);
+  // 폴더는 1단계만 (하위 폴더 없음)
+  for (const f of childrenOf(null)) {
+    const del = el("button", { className: "add", title: `'${f.name}' 폴더 삭제`, textContent: "🗑" });
+    del.onclick = (e) => { e.stopPropagation(); deleteFolder(f); };
+    const node = el("div", { className: "node" + (state.current === f.id ? " active" : "") }, el("span", { textContent: "📁 " + f.name }), del);
+    node.onclick = () => select(f.id);
+    tree.append(node);
+  }
   const trash = el("div", { className: "node trash-node" + (inTrash() ? " active" : ""), textContent: "🗑 휴지통" });
   trash.onclick = () => select("trash");
   tree.append(trash);
@@ -107,14 +103,37 @@ function renderCrumbs() {
   }
 }
 
-async function createFolder(parentId = targetFolder()) {
-  const name = prompt("폴더 이름");
-  if (!name?.trim()) return;
-  const { error } = await sb.from("folders").insert({ name: name.trim(), parent_id: parentId });
+async function createFolder() {
+  const name = prompt("폴더 이름")?.trim();
+  if (!name) return;
+  if (childrenOf(null).some((f) => f.name === name)) return alert(`'${name}' 폴더가 이미 있어요.`);
+  const { error } = await sb.from("folders").insert({ name, parent_id: null });
   if (error) return alert(error.message);
   await loadFolders(); renderTree();
 }
-$("new-folder").onclick = () => createFolder(targetFolder());
+$("new-folder").onclick = () => createFolder();
+
+// 폴더 삭제: 안의 항목은 휴지통으로 (복원하면 '미분류'로 돌아옴)
+async function deleteFolder(f) {
+  const { count, error: cErr } = await sb.from("items").select("id", { count: "exact", head: true })
+    .eq("folder_id", f.id).is("deleted_at", null);
+  if (cErr) return alert(cErr.message);
+  const msg = count
+    ? `'${f.name}' 폴더를 삭제할까요?\n안에 있는 ${count}개 항목은 휴지통으로 옮겨져요. (복원하면 '미분류'로 돌아와요)`
+    : `'${f.name}' 폴더를 삭제할까요? (빈 폴더)`;
+  if (!confirm(msg)) return;
+  if (count) {
+    const { error } = await sb.from("items").update({ deleted_at: new Date().toISOString() })
+      .eq("folder_id", f.id).is("deleted_at", null);
+    if (error) return alert(error.message);
+  }
+  const { error } = await sb.from("folders").delete().eq("id", f.id);
+  if (error) return alert(error.message);
+  toast(count ? `'${f.name}' 폴더를 삭제하고 ${count}개 항목을 휴지통으로 옮겼어요` : `'${f.name}' 폴더를 삭제했어요`);
+  await loadFolders();
+  if (state.current === f.id) select(null);
+  else { renderTree(); loadItems(); }
+}
 
 function select(id) {
   state.current = id;
@@ -579,10 +598,7 @@ const isViewerOpen = () => !$("viewer").classList.contains("hidden");
 
 function folderOptions() {
   const out = [["", "📥 미분류"]];
-  const walk = (pid, depth) => {
-    for (const f of childrenOf(pid)) { out.push([f.id, "　".repeat(depth) + "📁 " + f.name]); walk(f.id, depth + 1); }
-  };
-  walk(null, 0);
+  for (const f of childrenOf(null)) out.push([f.id, "📁 " + f.name]);
   return out;
 }
 
