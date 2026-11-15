@@ -167,7 +167,13 @@ button:disabled { opacity: .5; cursor: default; }
 .selecting .item.photo.selected .media img { opacity: .8; }
 .selecting .item .meta button, .selecting .item.photo .body { display: none; }
 
-/* 폴더 삭제 버튼: 마우스를 올리면 표시, 터치 기기에서는 항상 표시 */
-.node .add { font-size: 13px; }
-.node .add:hover { filter: brightness(.6); }
-@media (hover: none) { .node .add { opacity: .6; } }
+/* 폴더 삭제 버튼: 붉은 '삭제' 버튼, 마우스를 올리면 표시 (터치 기기는 항상 표시) */
+.node-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node .folder-del {
+  margin-left: auto; flex: none; opacity: 0; transition: opacity .12s ease;
+  background: #b3392f; border: 1px solid #b3392f; color: #fff;
+  font-size: 11px; font-weight: 600; line-height: 1; padding: 4px 8px; border-radius: 6px;
+}
+.node:hover .folder-del, .node .folder-del:focus-visible { opacity: 1; }
+.node .folder-del:hover { background: #962d24; border-color: #962d24; }
+@media (hover: none) { .node .folder-del { opacity: 1; } }

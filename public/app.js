@@ -70,20 +70,20 @@ function pathTo(id) {
 function renderTree() {
   const tree = $("tree");
   tree.replaceChildren();
-  const root = el("div", { className: "node" + (state.current === null ? " active" : ""), textContent: "🗂 전체" });
+  const root = el("div", { className: "node" + (state.current === null ? " active" : ""), textContent: "전체" });
   root.onclick = () => select(null);
-  const inbox = el("div", { className: "node" + (state.current === "inbox" ? " active" : ""), textContent: "📥 미분류" });
+  const inbox = el("div", { className: "node" + (state.current === "inbox" ? " active" : ""), textContent: "미분류" });
   inbox.onclick = () => select("inbox");
   tree.append(root, inbox);
   // 폴더는 1단계만 (하위 폴더 없음)
   for (const f of childrenOf(null)) {
-    const del = el("button", { className: "add", title: `'${f.name}' 폴더 삭제`, textContent: "🗑" });
+    const del = el("button", { className: "folder-del", title: `'${f.name}' 폴더 삭제`, textContent: "삭제" });
     del.onclick = (e) => { e.stopPropagation(); deleteFolder(f); };
-    const node = el("div", { className: "node" + (state.current === f.id ? " active" : "") }, el("span", { textContent: "📁 " + f.name }), del);
+    const node = el("div", { className: "node" + (state.current === f.id ? " active" : "") }, el("span", { className: "node-name", textContent: f.name }), del);
     node.onclick = () => select(f.id);
     tree.append(node);
   }
-  const trash = el("div", { className: "node trash-node" + (inTrash() ? " active" : ""), textContent: "🗑 휴지통" });
+  const trash = el("div", { className: "node trash-node" + (inTrash() ? " active" : ""), textContent: "휴지통" });
   trash.onclick = () => select("trash");
   tree.append(trash);
 }
@@ -597,8 +597,8 @@ const viewer = { list: [], i: 0, dirty: false };
 const isViewerOpen = () => !$("viewer").classList.contains("hidden");
 
 function folderOptions() {
-  const out = [["", "📥 미분류"]];
-  for (const f of childrenOf(null)) out.push([f.id, "📁 " + f.name]);
+  const out = [["", "미분류"]];
+  for (const f of childrenOf(null)) out.push([f.id, f.name]);
   return out;
 }
 
