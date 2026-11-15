@@ -5,7 +5,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = (id) => document.getElementById(id);
 
 // current: null = 전체(모든 항목), "inbox" = 미분류(폴더 없음), "trash" = 휴지통, 그 외 = 폴더 id
-const state = { user: null, folders: [], current: null, items: [], urls: {} };
+const state = { user: null, folders: [], current: null, items: [], urls: {}, selecting: false, selected: new Set() };
 const inTrash = () => state.current === "trash";
 // 새 항목이 들어갈 폴더 (전체/미분류 화면에서는 폴더 없음 → AI 자동 분류 대상)
 const targetFolder = () => (state.current === null || state.current === "inbox" || inTrash() ? null : state.current);
@@ -118,6 +118,7 @@ $("new-folder").onclick = () => createFolder(targetFolder());
 
 function select(id) {
   state.current = id;
+  setSelecting(false);
   $("lib-actions").classList.toggle("hidden", inTrash());
   $("drop").classList.toggle("hidden", inTrash());
   $("trash-actions").classList.toggle("hidden", !inTrash());
@@ -232,6 +233,9 @@ async function loadItems() {
   }
   state.items = data;
   state.urls = urls;
+  // 사라진 항목은 선택에서 제외
+  const ids = new Set(data.map((i) => i.id));
+  for (const id of [...state.selected]) if (!ids.has(id)) state.selected.delete(id);
   renderItems(data, urls);
 }
 
@@ -264,7 +268,11 @@ function renderItems(items, urls) {
       : btn("삭제", () => moveToTrash(it));
     // 사진: 정사각형에 꽉 채우고, 파일명·정보는 마우스를 올리면(모바일은 탭하면) 위에 표시
     const isPhoto = it.kind === "image" && src;
-    const card = el("article", { className: "item" + (isPhoto ? " photo" : ""), tabIndex: isPhoto ? 0 : -1 },
+    const card = el("article", {
+      className: "item" + (isPhoto ? " photo" : "") + (state.selected.has(it.id) ? " selected" : ""),
+      tabIndex: isPhoto ? 0 : -1,
+    },
+      el("span", { className: "check", "aria-hidden": "true", textContent: "✓" }),
       media ? el("div", { className: "media" }, media) : null,
       el("div", { className: "body" },
         titleNode,
@@ -273,10 +281,17 @@ function renderItems(items, urls) {
           el("span", { className: "tag", textContent: KIND_LABEL[it.kind] + (state.current === null ? " · " + (folderName(it.folder_id) ?? "미분류") : "") }),
           el("span", { textContent: new Date(inTrash() ? it.deleted_at : it.created_at).toLocaleDateString("ko-KR") + (inTrash() ? " 삭제" : "") }),
           actions)));
-    if (isPhoto) {
-      card.onclick = (e) => { if (!e.target.closest("a, button")) openViewer(it.id); };
-      card.onkeydown = (e) => { if (e.key === "Enter") openViewer(it.id); };
-    }
+    card.dataset.id = it.id;
+    card.onclick = (e) => {
+      if (state.selecting) { e.preventDefault(); toggleSelect(it.id, card); return; }
+      if (isPhoto && !e.target.closest("a, button")) openViewer(it.id);
+    };
+    card.onkeydown = (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      if (state.selecting) toggleSelect(it.id, card);
+      else if (isPhoto) openViewer(it.id);
+    };
     grid.append(card);
   }
 }
@@ -670,4 +685,93 @@ $("viewer").addEventListener("touchend", (e) => {
   const dx = e.changedTouches[0].clientX - touchX;
   touchX = null;
   if (Math.abs(dx) > 50) step(dx > 0 ? -1 : 1);
+});
+
+// ---------- 선택 모드 (여러 항목 이동·삭제) ----------
+function setSelecting(on) {
+  state.selecting = on;
+  state.selected.clear();
+  document.querySelector(".main").classList.toggle("selecting", on);
+  $("select-btn").classList.toggle("hidden", on);
+  $("select-bar").classList.toggle("hidden", !on);
+  $("lib-actions").classList.toggle("hidden", on || inTrash());
+  $("trash-actions").classList.toggle("hidden", on || !inTrash());
+  $("sel-move").classList.toggle("hidden", inTrash());
+  $("sel-restore").classList.toggle("hidden", !inTrash());
+  $("sel-delete").textContent = inTrash() ? "영구 삭제" : "삭제";
+  for (const c of document.querySelectorAll(".item.selected")) c.classList.remove("selected");
+  if (on) fillMoveOptions();
+  updateSelectBar();
+}
+
+function toggleSelect(id, card) {
+  if (state.selected.has(id)) state.selected.delete(id); else state.selected.add(id);
+  card?.classList.toggle("selected", state.selected.has(id));
+  updateSelectBar();
+}
+
+function updateSelectBar() {
+  const n = state.selected.size;
+  const all = state.items.length > 0 && n === state.items.length;
+  $("sel-count").textContent = `${n}개 선택`;
+  $("sel-all").textContent = all ? "선택 해제" : "모두 선택";
+  for (const id of ["sel-move", "sel-restore", "sel-delete"]) $(id).disabled = n === 0;
+}
+
+function fillMoveOptions() {
+  const sel = $("sel-move");
+  sel.replaceChildren(
+    el("option", { value: "__", textContent: "폴더로 이동…", disabled: true, selected: true }),
+    ...folderOptions().map(([v, t]) => el("option", { value: v, textContent: t })),
+  );
+}
+
+const selectedItems = () => state.items.filter((i) => state.selected.has(i.id));
+
+$("select-btn").onclick = () => setSelecting(true);
+$("sel-cancel").onclick = () => setSelecting(false);
+$("sel-all").onclick = () => {
+  const all = state.selected.size === state.items.length;
+  state.selected = new Set(all ? [] : state.items.map((i) => i.id));
+  for (const c of document.querySelectorAll("#grid .item")) c.classList.toggle("selected", state.selected.has(c.dataset.id));
+  updateSelectBar();
+};
+
+$("sel-move").onchange = async (e) => {
+  const items = selectedItems();
+  const folder_id = e.target.value || null;
+  e.target.value = "__";
+  if (!items.length) return;
+  const { error } = await sb.from("items").update({ folder_id }).in("id", items.map((i) => i.id));
+  if (error) return alert(error.message);
+  toast(`${items.length}개를 '${folderName(folder_id) ?? "미분류"}'(으)로 옮겼어요`);
+  setSelecting(false);
+  loadItems();
+};
+
+$("sel-delete").onclick = async () => {
+  const items = selectedItems();
+  if (!items.length) return;
+  if (inTrash()) {
+    if (await purgeWithConfirm(items, { reload: false })) { setSelecting(false); loadItems(); }
+    return;
+  }
+  const ids = items.map((i) => i.id);
+  const { error } = await sb.from("items").update({ deleted_at: new Date().toISOString() }).in("id", ids);
+  if (error) return alert(error.message);
+  toast(`${ids.length}개를 휴지통으로 옮겼어요`, "되돌리기", async () => {
+    await sb.from("items").update({ deleted_at: null }).in("id", ids);
+    loadItems();
+  });
+  setSelecting(false);
+  loadItems();
+};
+
+$("sel-restore").onclick = async () => {
+  const items = selectedItems();
+  if (items.length && (await restoreItems(items, { reload: false }))) { setSelecting(false); loadItems(); }
+};
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.selecting && !isViewerOpen()) setSelecting(false);
 });

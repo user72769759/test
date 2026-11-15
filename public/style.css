@@ -116,22 +116,21 @@ button:disabled { opacity: .5; cursor: default; }
 
 /* ---------- 사진 슬라이드쇼 ---------- */
 .item.photo { cursor: zoom-in; }
-.viewer {
-  position: fixed; inset: 0; z-index: 60; background: rgba(12, 12, 12, .94);
-  display: grid; grid-template-rows: 1fr auto; color: #fff;
-}
-.v-stage { min-height: 0; display: grid; place-items: center; padding: 56px 72px 12px; }
-.v-stage img { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; }
+.viewer { position: fixed; inset: 0; z-index: 60; background: rgba(12, 12, 12, .94); color: #fff; }
+/* 사진 영역을 화면 전체로 잡고 위아래 여백을 같게 → 세로 사진도 화면 정중앙 */
+.v-stage { position: absolute; inset: 0; padding: 84px 84px; display: flex; align-items: center; justify-content: center; }
+.v-stage img { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; user-select: none; }
 .v-btn {
   position: absolute; background: rgba(255, 255, 255, .1); border: none; color: #fff;
   width: 44px; height: 44px; border-radius: 50%; font-size: 26px; line-height: 1; display: grid; place-items: center; padding: 0;
 }
 .v-btn:hover:not(:disabled) { background: rgba(255, 255, 255, .22); }
 .v-btn:disabled { opacity: .2; }
-.v-close { top: 14px; right: 16px; font-size: 18px; }
-.v-prev { left: 16px; top: calc(50% - 40px); }
-.v-next { right: 16px; top: calc(50% - 40px); }
+.v-close { top: 14px; right: 16px; font-size: 18px; z-index: 1; }
+.v-prev { left: 16px; top: calc(50% - 22px); z-index: 1; }
+.v-next { right: 16px; top: calc(50% - 22px); z-index: 1; }
 .v-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; background: rgba(12, 12, 12, .7);
   display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;
   padding: 12px 20px 18px; border-top: 1px solid rgba(255, 255, 255, .1);
 }
@@ -142,7 +141,7 @@ button:disabled { opacity: .5; cursor: default; }
 .v-move select { font: inherit; padding: 7px 8px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, .25); background: #2a2826; color: #fff; }
 .v-light { color: #fff; border-color: rgba(255, 255, 255, .4); }
 @media (max-width: 720px) {
-  .v-stage { padding: 56px 8px 8px; }
+  .v-stage { padding: 64px 8px 120px; }
   .v-prev, .v-next { display: none; }
   .v-title { max-width: 80vw; }
 }
@@ -150,3 +149,20 @@ button:disabled { opacity: .5; cursor: default; }
 /* 슬라이드쇼가 열려 있으면 진행 패널을 위쪽으로 (하단 버튼을 가리지 않게) */
 .viewer-open .progress { bottom: auto; top: 70px; }
 .viewer-open .toast { bottom: 90px; }
+
+/* ---------- 툴바 · 선택 모드 ---------- */
+.toolbar { justify-content: flex-end; }
+.sel-move { font: inherit; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
+.item { position: relative; }
+.item .check {
+  display: none; position: absolute; top: 8px; left: 8px; z-index: 2; width: 24px; height: 24px; border-radius: 50%;
+  border: 2px solid #fff; background: rgba(0, 0, 0, .25); color: transparent; font-size: 14px; font-weight: 700;
+  place-items: center; box-shadow: 0 1px 4px rgba(0, 0, 0, .3);
+}
+.selecting .item { cursor: pointer; user-select: none; }
+.selecting .item .check { display: grid; }
+.selecting .item:not(.photo) .check { border-color: var(--line); background: #fff; }
+.selecting .item.selected { outline: 3px solid var(--accent); outline-offset: -3px; }
+.selecting .item.selected .check { background: var(--accent); border-color: #fff; color: #fff; }
+.selecting .item.photo.selected .media img { opacity: .8; }
+.selecting .item .meta button, .selecting .item.photo .body { display: none; }
