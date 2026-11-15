@@ -241,7 +241,9 @@ function renderItems(items, urls) {
 
     const del = el("button", { textContent: "삭제" });
     del.onclick = () => removeItem(it);
-    const card = el("article", { className: "item" },
+    // 사진: 정사각형에 꽉 채우고, 파일명·정보는 마우스를 올리면(모바일은 탭하면) 위에 표시
+    const isPhoto = it.kind === "image" && src;
+    const card = el("article", { className: "item" + (isPhoto ? " photo" : ""), tabIndex: isPhoto ? 0 : -1 },
       media ? el("div", { className: "media" }, media) : null,
       el("div", { className: "body" },
         titleNode,
