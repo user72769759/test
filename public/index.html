@@ -3,14 +3,35 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>모아두기</title>
+  <title>humane archive</title>
+  <meta name="description" content="글·사진·영상·음악을 올리면 AI가 주제별로 정리해 주는 나만의 아카이브" />
+  <meta name="theme-color" content="#2f6f5e" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="humane archive" />
+
+  <!-- 링크 공유 미리보기 (카카오톡·인스타그램·슬랙·X 등) -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="humane archive" />
+  <meta property="og:title" content="humane archive" />
+  <meta property="og:description" content="글·사진·영상·음악을 올리면 AI가 주제별로 정리해 주는 나만의 아카이브" />
+  <meta property="og:url" content="https://test.user72769759.workers.dev/" />
+  <meta property="og:image" content="https://test.user72769759.workers.dev/og-image.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="humane archive — 글·사진·영상을 주제별로 한곳에" />
+  <meta property="og:locale" content="ko_KR" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="humane archive" />
+  <meta name="twitter:description" content="글·사진·영상·음악을 올리면 AI가 주제별로 정리해 주는 나만의 아카이브" />
+  <meta name="twitter:image" content="https://test.user72769759.workers.dev/og-image.png" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <!-- 로그인 화면 -->
   <section id="auth" class="auth hidden">
     <form id="auth-form" class="card">
-      <h1>모아두기</h1>
+      <h1>humane archive</h1>
       <p class="muted">글, 사진, 영상, 음악을 주제별로 한곳에.</p>
       <input id="email" type="email" placeholder="이메일" required autocomplete="email" />
       <input id="password" type="password" placeholder="비밀번호 (6자 이상)" required minlength="6" autocomplete="current-password" />
@@ -25,7 +46,7 @@
   <!-- 메인 화면 -->
   <section id="app" class="app hidden">
     <aside class="sidebar">
-      <div class="brand">모아두기</div>
+      <div class="brand">humane archive</div>
       <button id="new-folder" class="ghost small-btn">+ 새 폴더</button>
       <nav id="tree"></nav>
       <div class="sidebar-foot">
