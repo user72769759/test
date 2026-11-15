@@ -87,7 +87,7 @@ button:disabled { opacity: .5; cursor: default; }
 
 /* ---------- 진행 상황 패널 ---------- */
 .progress {
-  position: fixed; right: 20px; bottom: 20px; z-index: 50; width: min(320px, calc(100vw - 40px));
+  position: fixed; right: 20px; bottom: 20px; z-index: 65; width: min(320px, calc(100vw - 40px));
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0, 0, 0, .12); padding: 12px 14px; display: grid; gap: 6px;
 }
@@ -146,3 +146,7 @@ button:disabled { opacity: .5; cursor: default; }
   .v-prev, .v-next { display: none; }
   .v-title { max-width: 80vw; }
 }
+
+/* 슬라이드쇼가 열려 있으면 진행 패널을 위쪽으로 (하단 버튼을 가리지 않게) */
+.viewer-open .progress { bottom: auto; top: 70px; }
+.viewer-open .toast { bottom: 90px; }

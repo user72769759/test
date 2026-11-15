@@ -577,6 +577,7 @@ function openViewer(id) {
   viewer.dirty = false;
   $("viewer").classList.remove("hidden");
   document.body.style.overflow = "hidden";
+  document.body.classList.add("viewer-open");
   $("v-move-wrap").classList.toggle("hidden", inTrash());
   $("v-restore").classList.toggle("hidden", !inTrash());
   $("v-delete").textContent = inTrash() ? "영구 삭제" : "휴지통으로";
@@ -588,6 +589,7 @@ function closeViewer() {
   $("viewer").classList.add("hidden");
   $("v-img").removeAttribute("src");
   document.body.style.overflow = "";
+  document.body.classList.remove("viewer-open");
   if (viewer.dirty) loadItems();
 }
 
