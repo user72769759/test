@@ -312,3 +312,13 @@ button, .btn { white-space: nowrap; flex-shrink: 0; }
 /* 선택 모드 단축키 안내 (PC에서만) */
 .shortcut-hint { color: var(--muted); font-size: 12px; }
 @media (max-width: 720px), (hover: none) { .shortcut-hint { display: none; } }
+
+/* 폴더 이동 목록의 '+ 새 폴더' 입력칸 */
+.newfolder { display: inline-flex; align-items: center; gap: 6px; }
+.newfolder-input {
+  width: 160px !important; padding: 7px 10px !important; font-size: 14px; border-radius: 8px !important;
+  border: 1px solid var(--accent) !important; background: var(--field) !important; color: var(--text);
+}
+.newfolder-ok { padding: 7px 12px; font-size: 14px; }
+.v-bar .newfolder-input { background: #3a2c22 !important; color: #fff; border-color: rgba(255, 255, 255, .45) !important; }
+.v-bar .newfolder-input::placeholder { color: rgba(255, 255, 255, .55); }

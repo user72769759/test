@@ -779,7 +779,7 @@ function showSlide() {
   $("v-title").textContent = it.title || "(제목 없음)";
   $("v-sub").textContent = `${viewer.i + 1} / ${viewer.list.length} · ${new Date(it.created_at).toLocaleDateString("ko-KR")}`;
   const sel = $("v-folder");
-  sel.replaceChildren(...folderOptions().map(([v, t]) => el("option", { value: v, textContent: t })));
+  sel.replaceChildren(...folderOptions().map(([v, t]) => el("option", { value: v, textContent: t })), newFolderOption());
   sel.value = it.folder_id ?? "";
   $("v-prev").disabled = viewer.i === 0;
   $("v-next").disabled = viewer.i === viewer.list.length - 1;
@@ -803,9 +803,9 @@ function dropCurrentIfGone(it) {
   showSlide();
 }
 
-$("v-folder").onchange = async (e) => {
+async function moveViewerItem(folder_id) {
   const it = viewer.list[viewer.i];
-  const folder_id = e.target.value || null;
+  if (!it) return;
   const prev = it.folder_id;
   const { error } = await sb.from("items").update({ folder_id }).eq("id", it.id);
   if (error) return alert(error.message);
@@ -816,8 +816,17 @@ $("v-folder").onchange = async (e) => {
   });
   viewer.dirty = true;
   toast(folder_id ? `'${folderName(folder_id)}'(으)로 옮겼어요` : "폴더에서 뺐어요 · '전체' 맨 위에 있어요");
-  e.target.blur(); // 방향키가 다시 사진 넘기기로 동작하도록
+  $("v-folder").blur(); // 방향키가 다시 사진 넘기기로 동작하도록
   dropCurrentIfGone(it);
+}
+
+$("v-folder").onchange = (e) => {
+  const it = viewer.list[viewer.i];
+  if (e.target.value === NEW_FOLDER) {
+    e.target.value = it?.folder_id ?? "";
+    return askNewFolder(e.target, (id) => moveViewerItem(id));
+  }
+  moveViewerItem(e.target.value || null);
 };
 
 $("v-delete").onclick = async () => {
@@ -890,6 +899,7 @@ function fillMoveOptions() {
   sel.replaceChildren(
     el("option", { value: "__", textContent: "폴더로 이동…", disabled: true, selected: true }),
     ...folderOptions().map(([v, t]) => el("option", { value: v, textContent: t })),
+    newFolderOption(),
   );
 }
 
@@ -904,14 +914,20 @@ $("sel-all").onclick = () => {
   updateSelectBar();
 };
 
-$("sel-move").onchange = async (e) => {
+async function moveSelectedTo(folder_id) {
   const items = selectedItems();
-  const folder_id = e.target.value || null;
-  e.target.value = "__";
   if (!items.length) return;
-  await moveItems(items, folder_id);
+  if (!(await moveItems(items, folder_id))) return;
   setSelecting(false);
   loadItems();
+}
+
+$("sel-move").onchange = (e) => {
+  const v = e.target.value;
+  e.target.value = "__";
+  if (!selectedItems().length) return;
+  if (v === NEW_FOLDER) return askNewFolder(e.target, (id) => moveSelectedTo(id));
+  moveSelectedTo(v || null);
 };
 
 $("sel-delete").onclick = async () => {
@@ -1005,6 +1021,58 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { e.preventDefault(); closeComposer(); }
   else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $("composer-form").requestSubmit(); }
 });
+
+const NEW_FOLDER = "__new";
+const newFolderOption = () => el("option", { value: NEW_FOLDER, textContent: "+ 새 폴더 만들어 넣기…" });
+
+// 폴더 이동 목록에서 '+ 새 폴더' → 그 자리에 이름 입력칸 (Enter 만들고 넣기, Esc 취소)
+function askNewFolder(selectEl, onCreated) {
+  const wrap = el("span", { className: "newfolder" });
+  const input = el("input", { className: "newfolder-input", placeholder: "새 폴더 이름", maxLength: 50 });
+  const ok = el("button", { type: "button", className: "newfolder-ok", textContent: "만들기" });
+  wrap.append(input, ok);
+  selectEl.classList.add("hidden");
+  selectEl.after(wrap);
+  input.focus();
+  let busy = false;
+  const close = () => { wrap.remove(); selectEl.classList.remove("hidden"); };
+  const submit = async () => {
+    if (busy) return;
+    const name = input.value.trim();
+    if (!name) return input.focus();
+    busy = true;
+    ok.disabled = true;
+    try {
+      const id = await ensureFolder(name);
+      close();
+      await onCreated(id);
+    } catch (e) {
+      alert("폴더를 만들지 못했어요: " + e.message);
+      busy = false;
+      ok.disabled = false;
+    }
+  };
+  input.onkeydown = (e) => {
+    e.stopPropagation(); // 슬라이드쇼 방향키·Esc와 겹치지 않게
+    if (e.key === "Enter") { e.preventDefault(); submit(); }
+    else if (e.key === "Escape") { e.preventDefault(); close(); }
+  };
+  ok.onmousedown = (e) => e.preventDefault(); // 버튼을 눌러도 입력칸 blur로 닫히지 않게
+  ok.onclick = submit;
+  input.onblur = () => setTimeout(() => { if (!busy && document.activeElement !== input) close(); }, 150);
+}
+
+// 같은 이름 폴더가 있으면 그 폴더를, 없으면 새로 만들어 id 반환
+async function ensureFolder(name) {
+  const existing = childrenOf(null).find((f) => f.name === name);
+  if (existing) return existing.id;
+  const { data, error } = await sb.from("folders").insert({ name, parent_id: null }).select().single();
+  if (error) throw error;
+  state.folders.push(data);
+  state.folders.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  renderTree();
+  return data.id;
+}
 
 // ---------- 되돌리기 (⌘Z) ----------
 const undoStack = [];
