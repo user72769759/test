@@ -4,11 +4,11 @@ import { SUPABASE_URL, SUPABASE_KEY } from "./config.js";
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 const $ = (id) => document.getElementById(id);
 
-// current: null = 전체(모든 항목), "inbox" = 미분류(폴더 없음), "trash" = 휴지통, 그 외 = 폴더 id
+// current: null = 전체(모든 항목, 정리 안 된 항목이 맨 위), "trash" = 휴지통, 그 외 = 폴더 id
 const state = { user: null, folders: [], current: null, items: [], urls: {}, selecting: false, selected: new Set() };
 const inTrash = () => state.current === "trash";
-// 새 항목이 들어갈 폴더 (전체/미분류 화면에서는 폴더 없음 → AI 자동 분류 대상)
-const targetFolder = () => (state.current === null || state.current === "inbox" || inTrash() ? null : state.current);
+// 새 항목이 들어갈 폴더 (전체 화면에서는 폴더 없음 → AI 자동 분류 대상)
+const targetFolder = () => (state.current === null || inTrash() ? null : state.current);
 const folderName = (id) => state.folders.find((f) => f.id === id)?.name;
 
 // ---------- 공통 ----------
@@ -73,9 +73,7 @@ function renderTree() {
   tree.replaceChildren();
   const root = el("div", { className: "node" + (state.current === null ? " active" : ""), textContent: "전체" });
   root.onclick = () => select(null);
-  const inbox = el("div", { className: "node" + (state.current === "inbox" ? " active" : ""), textContent: "미분류" });
-  inbox.onclick = () => select("inbox");
-  tree.append(root, inbox);
+  tree.append(root);
   // 폴더는 1단계만 (하위 폴더 없음)
   for (const f of childrenOf(null)) {
     const del = el("button", { className: "folder-del", title: `'${f.name}' 폴더 삭제`, textContent: "삭제" });
@@ -95,7 +93,6 @@ function renderCrumbs() {
   const home = el("a", { textContent: "전체" });
   home.onclick = () => select(null);
   c.append(home);
-  if (state.current === "inbox") c.append(" / 미분류");
   if (inTrash()) c.append(" / 휴지통");
   for (const f of pathTo(state.current)) {
     const a = el("a", { textContent: f.name });
@@ -114,13 +111,13 @@ async function createFolder() {
 }
 $("new-folder").onclick = () => createFolder();
 
-// 폴더 삭제: 안의 항목은 휴지통으로 (복원하면 '미분류'로 돌아옴)
+// 폴더 삭제: 안의 항목은 휴지통으로 (복원하면 '전체'의 정리 안 된 항목으로 돌아옴)
 async function deleteFolder(f) {
   const { count, error: cErr } = await sb.from("items").select("id", { count: "exact", head: true })
     .eq("folder_id", f.id).is("deleted_at", null);
   if (cErr) return alert(cErr.message);
   const msg = count
-    ? `'${f.name}' 폴더를 삭제할까요?\n안에 있는 ${count}개 항목은 휴지통으로 옮겨져요. (복원하면 '미분류'로 돌아와요)`
+    ? `'${f.name}' 폴더를 삭제할까요?\n안에 있는 ${count}개 항목은 휴지통으로 옮겨져요. (복원하면 '전체'에 정리 안 된 항목으로 돌아와요)`
     : `'${f.name}' 폴더를 삭제할까요? (빈 폴더)`;
   if (!confirm(msg)) return;
   if (count) {
@@ -211,18 +208,11 @@ async function classifyMany(pairs) {
   loadItems();
 }
 
-// 전체·미분류 화면: 폴더 없는 항목을 정리 / 폴더 화면: 그 폴더의 항목을 주제별 폴더로 다시 정리
+// 자동 분류: 어느 화면에서 눌러도 '정리 안 된 항목'(폴더 없음)만 AI가 주제별 폴더로 정리
 $("auto-classify").onclick = async () => {
-  const folder = targetFolder();
-  let q = sb.from("items").select("*").is("deleted_at", null);
-  q = folder ? q.eq("folder_id", folder) : q.is("folder_id", null);
-  const { data, error } = await q;
+  const { data, error } = await sb.from("items").select("*").is("deleted_at", null).is("folder_id", null);
   if (error) return alert(error.message);
-  if (!data.length) {
-    return alert(folder ? "이 폴더에 정리할 항목이 없어요."
-      : "미분류 항목이 없어요. 폴더 안 항목을 다시 정리하려면 그 폴더를 열고 눌러주세요.");
-  }
-  if (folder && !confirm(`'${folderName(folder)}' 폴더의 ${data.length}개 항목을 AI가 주제별 폴더로 옮겨요. 진행할까요?`)) return;
+  if (!data.length) return toast("정리 안 된 항목이 없어요. 모두 폴더에 들어가 있어요");
   const paths = data.filter((i) => i.kind === "image" && i.file_path).map((i) => i.file_path);
   const urls = {};
   if (paths.length) {
@@ -238,8 +228,7 @@ async function loadItems() {
   if (inTrash()) q = q.not("deleted_at", "is", null).order("deleted_at", { ascending: false });
   else {
     q = q.is("deleted_at", null).order("created_at", { ascending: false });
-    if (state.current === "inbox") q = q.is("folder_id", null);
-    else if (state.current !== null) q = q.eq("folder_id", state.current);
+    if (state.current !== null) q = q.eq("folder_id", state.current);
   }
   const { data, error } = await q;
   if (error) return alert(error.message);
@@ -251,6 +240,8 @@ async function loadItems() {
     const { data: signed } = await sb.storage.from("uploads").createSignedUrls(paths, 3600);
     for (const s of signed ?? []) urls[s.path] = s.signedUrl;
   }
+  // 전체 화면: 정리 안 된 항목(폴더 없음)을 맨 위로, 나머지는 최신순 유지
+  if (state.current === null) data.sort((a, b) => (a.folder_id === null ? 0 : 1) - (b.folder_id === null ? 0 : 1));
   state.items = data;
   state.urls = urls;
   // 사라진 항목은 선택에서 제외
@@ -288,17 +279,19 @@ function renderItems(items, urls) {
       : btn("삭제", () => moveToTrash(it));
     // 사진: 정사각형에 꽉 채우고, 파일명·정보는 마우스를 올리면(모바일은 탭하면) 위에 표시
     const isPhoto = it.kind === "image" && src;
+    const unsorted = state.current === null && !it.folder_id;
     const card = el("article", {
-      className: "item" + (isPhoto ? " photo" : "") + (state.selected.has(it.id) ? " selected" : ""),
+      className: "item" + (isPhoto ? " photo" : "") + (unsorted ? " unsorted" : "") + (state.selected.has(it.id) ? " selected" : ""),
       tabIndex: isPhoto ? 0 : -1,
     },
       el("span", { className: "check", "aria-hidden": "true", textContent: "✓" }),
+      unsorted ? el("span", { className: "unsorted-badge", textContent: "정리 안 됨" }) : null,
       media ? el("div", { className: "media" }, media) : null,
       el("div", { className: "body" },
         titleNode,
         it.body ? el("div", { className: "text", textContent: it.body }) : null,
         el("div", { className: "meta" },
-          el("span", { className: "tag", textContent: KIND_LABEL[it.kind] + (state.current === null ? " · " + (folderName(it.folder_id) ?? "미분류") : "") }),
+          el("span", { className: "tag", textContent: KIND_LABEL[it.kind] + (state.current === null && it.folder_id ? " · " + (folderName(it.folder_id) ?? "") : "") }),
           el("span", { textContent: new Date(inTrash() ? it.deleted_at : it.created_at).toLocaleDateString("ko-KR") + (inTrash() ? " 삭제" : "") }),
           actions)));
     card.dataset.id = it.id;
@@ -418,7 +411,7 @@ async function uploadFiles(files) {
   }
   if (failed.length) progress.done(`${added.length}개 업로드 · ${failed.length}개 실패: ${failed[0]}`, true);
   else progress.done(`${added.length}개 업로드 완료`);
-  // 전체·미분류에 올린 경우에만 자동 분류 (특정 폴더에 올리면 그대로 둠)
+  // 전체에 올린 경우에만 자동 분류 (특정 폴더에 올리면 그대로 둠)
   if (folderId === null && added.length) { loadItems(); classifyMany(added); }
   else loadItems();
 }
@@ -581,7 +574,7 @@ const viewer = { list: [], i: 0, dirty: false };
 const isViewerOpen = () => !$("viewer").classList.contains("hidden");
 
 function folderOptions() {
-  const out = [["", "미분류"]];
+  const out = [["", "폴더에서 빼기"]];
   for (const f of childrenOf(null)) out.push([f.id, f.name]);
   return out;
 }
@@ -636,7 +629,7 @@ $("viewer").onclick = (e) => { if (e.target.id === "viewer" || e.target.classLis
 
 // 지금 보는 화면에서 빠지는 사진이면 슬라이드에서도 제외
 function dropCurrentIfGone(it) {
-  const stays = state.current === null || (state.current === "inbox" ? it.folder_id === null : state.current === it.folder_id);
+  const stays = state.current === null || state.current === it.folder_id;
   if (!stays) viewer.list.splice(viewer.i, 1);
   showSlide();
 }
@@ -648,7 +641,7 @@ $("v-folder").onchange = async (e) => {
   if (error) return alert(error.message);
   it.folder_id = folder_id;
   viewer.dirty = true;
-  toast(`'${folderName(folder_id) ?? "미분류"}'(으)로 옮겼어요`);
+  toast(folder_id ? `'${folderName(folder_id)}'(으)로 옮겼어요` : "폴더에서 뺐어요 · '전체' 맨 위에 있어요");
   e.target.blur(); // 방향키가 다시 사진 넘기기로 동작하도록
   dropCurrentIfGone(it);
 };
@@ -744,7 +737,7 @@ $("sel-move").onchange = async (e) => {
   if (!items.length) return;
   const { error } = await sb.from("items").update({ folder_id }).in("id", items.map((i) => i.id));
   if (error) return alert(error.message);
-  toast(`${items.length}개를 '${folderName(folder_id) ?? "미분류"}'(으)로 옮겼어요`);
+  toast(folder_id ? `${items.length}개를 '${folderName(folder_id)}'(으)로 옮겼어요` : `${items.length}개를 폴더에서 뺐어요`);
   setSelecting(false);
   loadItems();
 };
@@ -794,7 +787,7 @@ function openComposer(mode) {
   const sel = $("c-folder");
   sel.replaceChildren(
     el("option", { value: AUTO, textContent: "✨ AI가 알아서 분류" }),
-    ...folderOptions().map(([v, t]) => el("option", { value: v, textContent: t })),
+    ...folderOptions().filter(([v]) => v).map(([v, t]) => el("option", { value: v, textContent: t })),
   );
   sel.value = targetFolder() ?? AUTO;
   $("composer").classList.add("open");

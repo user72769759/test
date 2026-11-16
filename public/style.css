@@ -257,3 +257,12 @@ button, .btn { white-space: nowrap; flex-shrink: 0; }
   .composer { width: 100vw; border-left: none; }
   .composer-foot > span { display: none; }
 }
+
+/* 전체 화면: 아직 정리되지 않은 항목 표시 */
+.unsorted-badge {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  background: var(--accent); color: var(--field); font-size: 11px; font-weight: 700;
+  padding: 3px 8px; border-radius: 999px; box-shadow: 0 1px 4px rgba(58, 42, 31, .25);
+}
+.item.unsorted:not(.photo) { border-color: var(--accent); }
+.item.unsorted:not(.photo) .body { padding-top: 30px; }
