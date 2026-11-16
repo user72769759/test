@@ -277,9 +277,10 @@ async function makeThumb(src, maxSize = 640) {
 // ---------- 항목 ----------
 async function loadItems() {
   let q = sb.from("items").select("*");
-  if (inTrash()) q = q.not("deleted_at", "is", null).order("deleted_at", { ascending: false });
+  const asc = sortOrder() === "oldest";
+  if (inTrash()) q = q.not("deleted_at", "is", null).order("deleted_at", { ascending: asc });
   else {
-    q = q.is("deleted_at", null).order("created_at", { ascending: false });
+    q = q.is("deleted_at", null).order("created_at", { ascending: asc });
     if (state.current !== null) q = q.eq("folder_id", state.current);
   }
   const { data, error } = await q;
@@ -898,6 +899,7 @@ function setSelecting(on) {
   state.selected.clear();
   document.querySelector(".main").classList.toggle("selecting", on);
   $("select-btn").classList.toggle("hidden", on);
+  $("sort-btn").classList.toggle("hidden", on);
   $("select-bar").classList.toggle("hidden", !on);
   $("lib-actions").classList.toggle("hidden", on || inTrash());
   $("trash-actions").classList.toggle("hidden", on || !inTrash());
@@ -1357,3 +1359,40 @@ function stopViewerAudio() {
   if (a) { a.pause(); a.removeAttribute("src"); a.load(); }
   $("va-player")?.replaceChildren();
 }
+
+// ---------- 정렬 (최신순 · 오래된순) — 이 브라우저에 기억 ----------
+const SORTS = { newest: "최신순", oldest: "오래된순" };
+let currentSort = "newest";
+try { const v = localStorage.getItem("ha-sort"); if (SORTS[v]) currentSort = v; } catch { /* 기본값 사용 */ }
+function sortOrder() { return currentSort; }
+function setSortOrder(v) {
+  currentSort = v;
+  try { localStorage.setItem("ha-sort", v); } catch { /* 저장 못 해도 이번 방문에는 적용 */ }
+  $("sort-label").textContent = SORTS[v];
+  loadItems();
+}
+$("sort-label").textContent = SORTS[currentSort];
+
+$("sort-btn").onclick = (e) => {
+  const anchor = e.currentTarget;
+  if (isFolderMenuOpen() && folderMenuAnchor === anchor) return closeFolderMenu();
+  const menu = $("folder-menu");
+  menu.replaceChildren();
+  menu.classList.remove("dark");
+  const cur = sortOrder();
+  for (const [v, label] of Object.entries(SORTS)) {
+    const b = el("button", { type: "button", className: "fm-item" + (v === cur ? " current" : ""), role: "menuitem" },
+      el("span", { textContent: label }),
+      el("span", { className: "fm-sub", textContent: v === "newest" ? "최근에 추가한 것부터" : "처음 추가한 것부터" }));
+    if (v === cur) b.append(el("span", { className: "fm-check", textContent: "✓" }));
+    b.onclick = () => { closeFolderMenu(); if (v !== cur) setSortOrder(v); };
+    menu.append(b);
+  }
+  menu.classList.remove("hidden");
+  const r = anchor.getBoundingClientRect();
+  menu.style.top = r.bottom + 6 + "px";
+  menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + "px";
+  folderMenuAnchor = anchor;
+  anchor.setAttribute("aria-expanded", "true");
+  (menu.querySelector(".fm-item.current") || menu.querySelector(".fm-item")).focus();
+};
