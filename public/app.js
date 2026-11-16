@@ -173,7 +173,11 @@ async function classifyItem(item, imageSrc) {
     body: JSON.stringify({ kind: item.kind, title: item.title, body: item.body, url: item.url, image, topics }),
   });
   const out = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(out.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(out.error || `HTTP ${res.status}`);
+    err.quota = out.code === "quota";
+    throw err;
+  }
 
   let folder = childrenOf(null).find((f) => f.name === out.topic);
   if (!folder) {
@@ -191,15 +195,21 @@ async function classifyItem(item, imageSrc) {
 async function classifyMany(pairs) {
   const btn = $("auto-classify");
   btn.disabled = true;
-  let done = 0, failed = 0, lastError = "";
+  let done = 0, failed = 0, lastError = "", quotaHit = false;
   for (const { item, imageSrc } of pairs) {
     const n = done + failed;
     progress.show(`✨ AI가 분류 중 ${n + 1}/${pairs.length}`, item.title, n / pairs.length);
     try { await classifyItem(item, imageSrc); done++; }
-    catch (e) { console.error(e); lastError = e.message; failed++; }
+    catch (e) {
+      console.error(e);
+      if (e.quota) { quotaHit = true; break; } // 한도 초과: 남은 항목은 '정리 안 됨'으로 둠
+      lastError = e.message; failed++;
+    }
     renderTree();
   }
-  progress.done(failed
+  const left = pairs.length - done - failed;
+  if (quotaHit) progress.done(`오늘 AI 분류 한도(30건)를 다 썼어요. ${left}개는 '정리 안 됨'으로 두었다가 오전 9시 이후 ✨ 자동 분류로 이어서 정리하세요`, true);
+  else progress.done(failed
     ? `${done}개 정리 · ${failed}개 실패 (${lastError})`
     : `✨ ${done}개를 주제별로 정리했어요`, !!failed);
   btn.disabled = false;
@@ -384,16 +394,65 @@ async function uploadWithProgress(path, file, onProgress) {
   });
 }
 
-async function uploadFiles(files) {
-  if (!files.length) return;
+// ---------- 1인당 한도 (10명 기준) ----------
+const STORAGE_LIMIT = 90 * 1024 * 1024; // 90MB
+const FILE_LIMIT = 20 * 1024 * 1024;    // 파일 1개 20MB
+const AI_LIMIT = 30;                     // 하루 30건
+const mb = (b) => (b / 1048576).toFixed(b < 10 * 1048576 ? 1 : 0) + "MB";
+
+async function getUsage() {
+  const { data, error } = await sb.rpc("my_usage");
+  if (error) throw error;
+  return data;
+}
+
+// 사진 압축: 긴 변 2000px JPEG로 줄여 저장 공간 절약 (작은 파일·GIF는 그대로)
+async function compressImage(file) {
+  if (!/^image\/(jpeg|png|webp|heic|heif)$/i.test(file.type) || file.size < 400 * 1024) return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width * scale);
+    c.height = Math.round(bmp.height * scale);
+    const g = c.getContext("2d");
+    g.fillStyle = "#ffffff"; // 투명 PNG 배경
+    g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close?.();
+    const blob = await new Promise((ok) => c.toBlob(ok, "image/jpeg", 0.85));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg", lastModified: file.lastModified });
+  } catch {
+    return file; // 브라우저가 못 읽는 형식이면 원본 그대로
+  }
+}
+
+async function uploadFiles(rawFiles) {
+  if (!rawFiles.length) return;
   const folderId = targetFolder(); // 업로드 도중 화면을 옮겨도 처음 위치에 저장
   const added = [];
   const failed = [];
+  progress.show("사진 준비 중…", "", null);
+  const files = [];
+  for (const f of rawFiles) files.push(await compressImage(f));
+  let used = 0;
+  try { used = (await getUsage()).storage_used; } catch { /* 확인 실패 시 서버 규칙이 막아 줌 */ }
   const totalBytes = files.reduce((s, f) => s + f.size, 0) || 1;
   let doneBytes = 0;
   for (const [n, file] of files.entries()) {
     const label = `업로드 중 ${n + 1}/${files.length}`;
     progress.show(label, file.name, doneBytes / totalBytes);
+    if (file.size > FILE_LIMIT) {
+      failed.push(`${file.name} (파일 1개는 20MB까지 올릴 수 있어요)`);
+      doneBytes += file.size;
+      continue;
+    }
+    if (used >= STORAGE_LIMIT) {
+      failed.push(`${file.name} (저장 공간 90MB를 다 썼어요. 휴지통을 비우거나 항목을 정리해 주세요)`);
+      doneBytes += file.size;
+      continue;
+    }
     const ext = (file.name.includes(".") ? file.name.split(".").pop() : "bin").replace(/[^a-z0-9]/gi, "").slice(0, 10) || "bin";
     const path = `${state.user.id}/${crypto.randomUUID()}.${ext}`;
     try {
@@ -403,13 +462,14 @@ async function uploadFiles(files) {
       }).select().single();
       if (error) throw error;
       added.push({ item: data, imageSrc: file });
+      used += file.size;
     } catch (e) {
       console.error(e);
       failed.push(`${file.name} (${e.message})`);
     }
     doneBytes += file.size;
   }
-  if (failed.length) progress.done(`${added.length}개 업로드 · ${failed.length}개 실패: ${failed[0]}`, true);
+  if (failed.length) progress.done(`${added.length}개 업로드 · ${failed.length}개 못 올림: ${failed[0]}`, true);
   else progress.done(`${added.length}개 업로드 완료`);
   // 전체에 올린 경우에만 자동 분류 (특정 폴더에 올리면 그대로 둠)
   if (folderId === null && added.length) { loadItems(); classifyMany(added); }
@@ -439,6 +499,18 @@ function paintAvatar(node, url) {
   node.style.backgroundImage = url ? `url("${url}")` : "";
   node.textContent = url ? "" : (displayName()[0] || "?").toUpperCase();
 }
+async function renderUsage() {
+  try {
+    const u = await getUsage();
+    $("u-storage-text").textContent = `${mb(u.storage_used)} / ${mb(u.storage_limit)}`;
+    $("u-storage-fill").style.width = Math.min(100, (u.storage_used / u.storage_limit) * 100) + "%";
+    $("u-ai-text").textContent = `${u.ai_used_today} / ${u.ai_limit}건`;
+    $("u-ai-fill").style.width = Math.min(100, (u.ai_used_today / u.ai_limit) * 100) + "%";
+  } catch {
+    $("u-storage-text").textContent = $("u-ai-text").textContent = "확인하지 못했어요";
+  }
+}
+
 async function renderProfile() {
   $("side-name").textContent = displayName();
   $("set-email").textContent = state.user.email;
@@ -453,7 +525,7 @@ function showSettings(on) {
   $("delete-confirm").value = "";
   say("");
 }
-$("open-settings").onclick = () => showSettings(true);
+$("open-settings").onclick = () => { showSettings(true); renderUsage(); };
 $("close-settings").onclick = () => showSettings(false);
 
 // 이름 변경 (로그인 계정 정보 user_metadata.name 에 저장)

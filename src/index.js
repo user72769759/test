@@ -33,6 +33,22 @@ async function classify(request, env) {
   let input;
   try { input = await request.json(); } catch { return json({ error: "잘못된 요청" }, 400); }
 
+  // 1인당 하루 AI 분류 한도 (DB 함수가 원자적으로 1 증가, 한도 초과면 -1)
+  const quota = await fetch(`${env.SUPABASE_URL}/rest/v1/rpc/consume_ai_quota`, {
+    method: "POST",
+    headers: {
+      apikey: env.SUPABASE_KEY,
+      authorization: request.headers.get("authorization"),
+      "content-type": "application/json",
+    },
+    body: "{}",
+  });
+  if (!quota.ok) return json({ error: "사용량을 확인하지 못했어요" }, 502);
+  const used = await quota.json();
+  if (used === -1) {
+    return json({ error: "오늘 AI 분류 한도(30건)를 다 썼어요. 한국 시간 오전 9시에 다시 채워져요.", code: "quota" }, 429);
+  }
+
   const topics = (Array.isArray(input.topics) ? input.topics : []).map(String).slice(0, 100);
   const clip = (s, n) => (s ? String(s).slice(0, n) : "");
   const lines = [
@@ -75,5 +91,5 @@ async function classify(request, env) {
   const norm = (s) => s.replace(/\s+/g, "").toLowerCase();
   topic = topics.find((t) => norm(t) === norm(topic)) ?? topic;
 
-  return json({ topic, usedImage: !!image });
+  return json({ topic, usedImage: !!image, usedToday: used, dailyLimit: 30 });
 }

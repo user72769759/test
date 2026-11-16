@@ -266,3 +266,8 @@ button, .btn { white-space: nowrap; flex-shrink: 0; }
 }
 .item.unsorted:not(.photo) { border-color: var(--accent); }
 .item.unsorted:not(.photo) .body { padding-top: 30px; }
+
+/* 계정 설정: 사용량 */
+.usage { display: grid; gap: 6px; }
+.usage-row { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; }
+.panel > p.small { margin: 0; }
