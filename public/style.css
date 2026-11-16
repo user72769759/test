@@ -481,7 +481,7 @@ button, .btn { white-space: nowrap; flex-shrink: 0; }
 #tree { flex: 0 1 auto; }
 .sidebar-foot { margin-top: 0; }
 @media (min-width: 721px) {
-  .sidebar { position: sticky; top: 0; align-self: start; height: auto; max-height: 100vh; overflow-y: auto; }
+  .sidebar { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; }
   .app { align-items: start; }
   .main { min-height: 100vh; }
 }
