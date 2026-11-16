@@ -778,9 +778,7 @@ function showSlide() {
   $("v-img").alt = it.title;
   $("v-title").textContent = it.title || "(제목 없음)";
   $("v-sub").textContent = `${viewer.i + 1} / ${viewer.list.length} · ${new Date(it.created_at).toLocaleDateString("ko-KR")}`;
-  const sel = $("v-folder");
-  sel.replaceChildren(...folderOptions().map(([v, t]) => el("option", { value: v, textContent: t })), newFolderOption());
-  sel.value = it.folder_id ?? "";
+  $("v-folder-label").textContent = folderName(it.folder_id) ?? "정리 안 됨";
   $("v-prev").disabled = viewer.i === 0;
   $("v-next").disabled = viewer.i === viewer.list.length - 1;
   // 앞뒤 사진 미리 불러오기
@@ -820,13 +818,10 @@ async function moveViewerItem(folder_id) {
   dropCurrentIfGone(it);
 }
 
-$("v-folder").onchange = (e) => {
+$("v-folder").onclick = (e) => {
   const it = viewer.list[viewer.i];
-  if (e.target.value === NEW_FOLDER) {
-    e.target.value = it?.folder_id ?? "";
-    return askNewFolder(e.target, (id) => moveViewerItem(id));
-  }
-  moveViewerItem(e.target.value || null);
+  if (!it) return;
+  openFolderMenu(e.currentTarget, { current: it.folder_id, onPick: (id) => moveViewerItem(id) });
 };
 
 $("v-delete").onclick = async () => {
@@ -847,7 +842,7 @@ $("v-restore").onclick = async () => {
 };
 
 document.addEventListener("keydown", (e) => {
-  if (!isViewerOpen() || e.target.tagName === "SELECT") return;
+  if (!isViewerOpen() || isFolderMenuOpen() || isTyping(e.target)) return;
   if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
   else if (e.key === "ArrowRight") { e.preventDefault(); step(1); }
   else if (e.key === "Escape") closeViewer();
@@ -876,7 +871,6 @@ function setSelecting(on) {
   $("sel-restore").classList.toggle("hidden", !inTrash());
   $("sel-delete").textContent = inTrash() ? "영구 삭제" : "삭제";
   for (const c of document.querySelectorAll(".item.selected")) c.classList.remove("selected");
-  if (on) fillMoveOptions();
   updateSelectBar();
 }
 
@@ -892,15 +886,6 @@ function updateSelectBar() {
   $("sel-count").textContent = `${n}개 선택`;
   $("sel-all").textContent = all ? "선택 해제" : "모두 선택";
   for (const id of ["sel-move", "sel-restore", "sel-delete"]) $(id).disabled = n === 0;
-}
-
-function fillMoveOptions() {
-  const sel = $("sel-move");
-  sel.replaceChildren(
-    el("option", { value: "__", textContent: "폴더로 이동…", disabled: true, selected: true }),
-    ...folderOptions().map(([v, t]) => el("option", { value: v, textContent: t })),
-    newFolderOption(),
-  );
 }
 
 const selectedItems = () => state.items.filter((i) => state.selected.has(i.id));
@@ -922,12 +907,9 @@ async function moveSelectedTo(folder_id) {
   loadItems();
 }
 
-$("sel-move").onchange = (e) => {
-  const v = e.target.value;
-  e.target.value = "__";
+$("sel-move").onclick = (e) => {
   if (!selectedItems().length) return;
-  if (v === NEW_FOLDER) return askNewFolder(e.target, (id) => moveSelectedTo(id));
-  moveSelectedTo(v || null);
+  openFolderMenu(e.currentTarget, { current: undefined, onPick: (id) => moveSelectedTo(id) });
 };
 
 $("sel-delete").onclick = async () => {
@@ -1022,45 +1004,88 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $("composer-form").requestSubmit(); }
 });
 
-const NEW_FOLDER = "__new";
-const newFolderOption = () => el("option", { value: NEW_FOLDER, textContent: "+ 새 폴더 만들어 넣기…" });
+// ---------- 폴더 선택 메뉴 (테마 적용, 선택 모드·슬라이드쇼 공용) ----------
+const isFolderMenuOpen = () => !$("folder-menu").classList.contains("hidden");
+let folderMenuAnchor = null;
 
-// 폴더 이동 목록에서 '+ 새 폴더' → 그 자리에 이름 입력칸 (Enter 만들고 넣기, Esc 취소)
-function askNewFolder(selectEl, onCreated) {
-  const wrap = el("span", { className: "newfolder" });
-  const input = el("input", { className: "newfolder-input", placeholder: "새 폴더 이름", maxLength: 50 });
-  const ok = el("button", { type: "button", className: "newfolder-ok", textContent: "만들기" });
-  wrap.append(input, ok);
-  selectEl.classList.add("hidden");
-  selectEl.after(wrap);
-  input.focus();
-  let busy = false;
-  const close = () => { wrap.remove(); selectEl.classList.remove("hidden"); };
-  const submit = async () => {
-    if (busy) return;
-    const name = input.value.trim();
-    if (!name) return input.focus();
-    busy = true;
-    ok.disabled = true;
-    try {
-      const id = await ensureFolder(name);
-      close();
-      await onCreated(id);
-    } catch (e) {
-      alert("폴더를 만들지 못했어요: " + e.message);
-      busy = false;
-      ok.disabled = false;
-    }
-  };
-  input.onkeydown = (e) => {
-    e.stopPropagation(); // 슬라이드쇼 방향키·Esc와 겹치지 않게
-    if (e.key === "Enter") { e.preventDefault(); submit(); }
-    else if (e.key === "Escape") { e.preventDefault(); close(); }
-  };
-  ok.onmousedown = (e) => e.preventDefault(); // 버튼을 눌러도 입력칸 blur로 닫히지 않게
-  ok.onclick = submit;
-  input.onblur = () => setTimeout(() => { if (!busy && document.activeElement !== input) close(); }, 150);
+function closeFolderMenu() {
+  $("folder-menu").classList.add("hidden");
+  $("folder-menu").replaceChildren();
+  folderMenuAnchor?.setAttribute("aria-expanded", "false");
+  folderMenuAnchor?.focus();
+  folderMenuAnchor = null;
 }
+
+// current: 지금 들어 있는 폴더 id(null = 정리 안 됨, undefined = 여러 개라 표시 안 함)
+function openFolderMenu(anchor, { current, onPick }) {
+  if (isFolderMenuOpen() && folderMenuAnchor === anchor) return closeFolderMenu();
+  const menu = $("folder-menu");
+  menu.replaceChildren();
+  menu.classList.toggle("dark", !!anchor.closest(".viewer"));
+  const pick = (id) => { closeFolderMenu(); onPick(id); };
+
+  const item = (label, id, cls = "") => {
+    const b = el("button", { type: "button", className: "fm-item " + cls, textContent: label, role: "menuitem" });
+    if (id === current) { b.classList.add("current"); b.append(el("span", { className: "fm-check", textContent: "✓" })); }
+    b.onclick = () => pick(id);
+    return b;
+  };
+
+  // 새 폴더 (강조) → 누르면 메뉴 안에서 이름 입력
+  const newBtn = el("button", { type: "button", className: "fm-item fm-new", role: "menuitem" },
+    el("span", { className: "fm-plus", textContent: "+" }), "새 폴더에 저장하기");
+  newBtn.onclick = () => {
+    const form = el("form", { className: "fm-newform" });
+    const input = el("input", { className: "fm-input", placeholder: "새 폴더 이름", maxLength: 50 });
+    const ok = el("button", { type: "submit", className: "fm-ok", textContent: "저장" });
+    form.append(input, ok);
+    newBtn.replaceWith(form);
+    input.focus();
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const name = input.value.trim();
+      if (!name) return input.focus();
+      ok.disabled = true;
+      try { const id = await ensureFolder(name); pick(id); }
+      catch (err) { ok.disabled = false; alert("폴더를 만들지 못했어요: " + err.message); }
+    };
+  };
+
+  menu.append(newBtn, el("div", { className: "fm-sep" }));
+  const list = el("div", { className: "fm-list" });
+  for (const f of childrenOf(null)) list.append(item(f.name, f.id));
+  if (!childrenOf(null).length) list.append(el("div", { className: "fm-empty", textContent: "아직 폴더가 없어요" }));
+  menu.append(list);
+  if (current !== null) menu.append(el("div", { className: "fm-sep" }), item("폴더에서 빼기", null, "fm-remove"));
+
+  // 버튼 위치에 맞춰 띄우기 (아래 공간이 모자라면 위로)
+  menu.classList.remove("hidden");
+  const r = anchor.getBoundingClientRect();
+  const mh = menu.offsetHeight, mw = menu.offsetWidth;
+  const below = window.innerHeight - r.bottom;
+  menu.style.top = (below >= mh + 8 || below > r.top ? r.bottom + 6 : r.top - mh - 6) + "px";
+  menu.style.left = Math.max(8, Math.min(r.right - mw, window.innerWidth - mw - 8)) + "px";
+  folderMenuAnchor = anchor;
+  anchor.setAttribute("aria-expanded", "true");
+  (menu.querySelector(".fm-item.current") || newBtn).focus();
+}
+
+// 메뉴 바깥 클릭 · Esc · 방향키
+document.addEventListener("mousedown", (e) => {
+  if (isFolderMenuOpen() && !e.target.closest("#folder-menu") && !e.target.closest(".menu-btn")) closeFolderMenu();
+}, true);
+document.addEventListener("keydown", (e) => {
+  if (!isFolderMenuOpen()) return;
+  if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeFolderMenu(); return; }
+  if (e.target.classList?.contains("fm-input")) return;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault(); e.stopImmediatePropagation();
+    const items = [...$("folder-menu").querySelectorAll(".fm-item")];
+    const i = items.indexOf(document.activeElement);
+    items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+  }
+}, true);
+window.addEventListener("resize", () => { if (isFolderMenuOpen()) closeFolderMenu(); });
 
 // 같은 이름 폴더가 있으면 그 폴더를, 없으면 새로 만들어 id 반환
 async function ensureFolder(name) {
