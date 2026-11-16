@@ -214,3 +214,46 @@ button:disabled { opacity: .5; cursor: default; }
 /* 버튼 글자가 두 줄로 꺾이지 않게, 입력칸이 남는 폭을 차지 */
 button, .btn { white-space: nowrap; flex-shrink: 0; }
 .panel .row input { flex: 1; min-width: 0; }
+
+/* ---------- 글쓰기 · 링크 저장 패널 (오른쪽에서 열리는 1/3 패널) ---------- */
+.composer-backdrop { position: fixed; inset: 0; z-index: 55; background: rgba(58, 42, 31, .18); }
+.composer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 56;
+  width: max(380px, 33.333vw); max-width: 100vw;
+  background: var(--panel); border-left: 1px solid var(--line);
+  box-shadow: -18px 0 40px rgba(58, 42, 31, .14);
+  transform: translateX(100%); visibility: hidden;
+  transition: transform .28s cubic-bezier(.2, .8, .2, 1), visibility 0s linear .28s;
+}
+.composer.open { transform: none; visibility: visible; transition: transform .28s cubic-bezier(.2, .8, .2, 1); }
+.composer-inner { height: 100%; display: flex; flex-direction: column; gap: 12px; padding: 22px 26px 20px; }
+.composer-head { display: flex; align-items: center; justify-content: space-between; }
+.composer-head h2 { margin: 0; font-size: 26px; font-weight: 600; font-style: italic; }
+.composer-x { background: none; border: none; color: var(--muted); font-size: 18px; padding: 4px 8px; border-radius: 8px; }
+.composer-x:hover { background: var(--accent-soft) !important; color: var(--accent); }
+.composer input, .composer textarea, .composer select { font-family: var(--font-body); color: var(--text); }
+.c-title {
+  font-size: 22px !important; font-weight: 700; padding: 6px 0 !important;
+  border: none !important; border-bottom: 1px solid var(--line) !important; border-radius: 0 !important; background: transparent !important;
+}
+.c-url { font-size: 15px; }
+.c-title:focus, .c-body:focus, .c-url:focus { outline: none; }
+.c-title:focus { border-bottom-color: var(--accent) !important; }
+.c-body {
+  flex: 1; min-height: 160px; resize: none; font-size: 16px; line-height: 1.85;
+  padding: 4px 0 !important; border: none !important; background: transparent !important;
+  /* 공책 줄 */
+  background-image: linear-gradient(transparent calc(1.85em - 1px), var(--line) calc(1.85em - 1px)) !important;
+  background-size: 100% 1.85em !important; background-attachment: local !important;
+}
+.c-url:focus { border-color: var(--accent); }
+.c-folder { display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted); }
+.c-folder select {
+  flex: 1; font-size: 14px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--field);
+}
+.c-msg { margin: 0; min-height: 1em; color: var(--danger); }
+.composer-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+@media (max-width: 720px) {
+  .composer { width: 100vw; border-left: none; }
+  .composer-foot > span { display: none; }
+}

@@ -366,25 +366,8 @@ $("empty-trash").onclick = async () => {
   purgeWithConfirm(data);
 };
 
-$("add-note").onclick = async () => {
-  const title = prompt("제목");
-  if (title === null) return;
-  const body = prompt("내용") ?? "";
-  const { data, error } = await sb.from("items").insert({ kind: "note", title, body, folder_id: targetFolder() }).select().single();
-  if (error) return alert(error.message);
-  if (targetFolder() === null) classifyMany([{ item: data }]);
-  else loadItems();
-};
-
-$("add-link").onclick = async () => {
-  const url = prompt("저장할 링크 (https://…)");
-  if (!url || !/^https?:\/\//.test(url)) return url && alert("http:// 또는 https:// 로 시작하는 주소를 넣어주세요.");
-  const title = prompt("제목 (비워도 돼요)") ?? "";
-  const { data, error } = await sb.from("items").insert({ kind: "link", url, title: title || url, folder_id: targetFolder() }).select().single();
-  if (error) return alert(error.message);
-  if (targetFolder() === null) classifyMany([{ item: data }]);
-  else loadItems();
-};
+$("add-note").onclick = () => openComposer("note");
+$("add-link").onclick = () => openComposer("link");
 
 // supabase-js 업로드는 진행률을 알려주지 않아서, 같은 저장소 API를 XHR로 직접 호출
 async function uploadWithProgress(path, file, onProgress) {
@@ -790,5 +773,76 @@ $("sel-restore").onclick = async () => {
 };
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && state.selecting && !isViewerOpen()) setSelecting(false);
+  if (e.key === "Escape" && state.selecting && !isViewerOpen() && !isComposerOpen()) setSelecting(false);
+});
+
+// ---------- 글쓰기 · 링크 저장 패널 ----------
+const composer = { mode: "note", saving: false };
+const isComposerOpen = () => $("composer").classList.contains("open");
+const AUTO = "__auto";
+
+function openComposer(mode) {
+  composer.mode = mode;
+  const isLink = mode === "link";
+  $("composer-heading").textContent = isLink ? "링크 저장" : "새 글";
+  $("c-url").classList.toggle("hidden", !isLink);
+  $("c-url").required = isLink;
+  $("c-title").placeholder = isLink ? "제목 (비워 두면 링크 주소로 저장돼요)" : "제목";
+  $("c-body").placeholder = isLink ? "이 링크에 대한 메모 (선택)" : "떠오르는 생각을 자유롭게 적어 보세요";
+  $("c-title").value = $("c-body").value = $("c-url").value = "";
+  $("c-msg").textContent = "";
+  const sel = $("c-folder");
+  sel.replaceChildren(
+    el("option", { value: AUTO, textContent: "✨ AI가 알아서 분류" }),
+    ...folderOptions().map(([v, t]) => el("option", { value: v, textContent: t })),
+  );
+  sel.value = targetFolder() ?? AUTO;
+  $("composer").classList.add("open");
+  $("composer").setAttribute("aria-hidden", "false");
+  $("composer-backdrop").classList.remove("hidden");
+  setTimeout(() => (isLink ? $("c-url") : $("c-title")).focus(), 180);
+}
+
+function closeComposer(force = false) {
+  const dirty = $("c-title").value.trim() || $("c-body").value.trim() || $("c-url").value.trim();
+  if (!force && dirty && !confirm("작성 중인 내용이 사라져요. 닫을까요?")) return;
+  $("composer").classList.remove("open");
+  $("composer").setAttribute("aria-hidden", "true");
+  $("composer-backdrop").classList.add("hidden");
+}
+
+$("composer-close").onclick = () => closeComposer();
+$("c-cancel").onclick = () => closeComposer();
+$("composer-backdrop").onclick = () => closeComposer();
+
+$("composer-form").onsubmit = async (e) => {
+  e.preventDefault();
+  if (composer.saving) return;
+  const isLink = composer.mode === "link";
+  const title = $("c-title").value.trim();
+  const body = $("c-body").value.trim();
+  const url = $("c-url").value.trim();
+  if (isLink && !/^https?:\/\/\S+/.test(url)) return ($("c-msg").textContent = "http:// 또는 https:// 로 시작하는 주소를 넣어 주세요.");
+  if (!isLink && !title && !body) return ($("c-msg").textContent = "제목이나 내용을 적어 주세요.");
+  const choice = $("c-folder").value;
+  const auto = choice === AUTO;
+  const row = isLink
+    ? { kind: "link", url, title: title || url, body: body || null, folder_id: auto ? null : choice || null }
+    : { kind: "note", title, body, folder_id: auto ? null : choice || null };
+  composer.saving = true;
+  $("c-save").disabled = true;
+  const { data, error } = await sb.from("items").insert(row).select().single();
+  composer.saving = false;
+  $("c-save").disabled = false;
+  if (error) return ($("c-msg").textContent = "저장하지 못했어요: " + error.message);
+  closeComposer(true);
+  toast(isLink ? "링크를 저장했어요" : "글을 저장했어요");
+  if (auto) classifyMany([{ item: data }]);
+  else loadItems();
+};
+
+document.addEventListener("keydown", (e) => {
+  if (!isComposerOpen()) return;
+  if (e.key === "Escape") { e.preventDefault(); closeComposer(); }
+  else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $("composer-form").requestSubmit(); }
 });

@@ -153,6 +153,31 @@
   <!-- 알림 (되돌리기 등) -->
   <div id="toast" class="toast hidden"><span id="toast-msg"></span><button id="toast-action" class="ghost small-btn hidden"></button></div>
 
+  <!-- 글쓰기 · 링크 저장 패널 -->
+  <div id="composer-backdrop" class="composer-backdrop hidden"></div>
+  <aside id="composer" class="composer" role="dialog" aria-modal="true" aria-labelledby="composer-heading" aria-hidden="true">
+    <form id="composer-form" class="composer-inner">
+      <header class="composer-head">
+        <h2 id="composer-heading">새 글</h2>
+        <button type="button" id="composer-close" class="composer-x" aria-label="닫기 (Esc)">✕</button>
+      </header>
+      <input id="c-url" class="c-url hidden" type="url" placeholder="https://" autocomplete="off" />
+      <input id="c-title" class="c-title" placeholder="제목" maxlength="200" autocomplete="off" />
+      <textarea id="c-body" class="c-body" placeholder="떠오르는 생각을 자유롭게 적어 보세요"></textarea>
+      <label class="c-folder">저장 위치
+        <select id="c-folder"></select>
+      </label>
+      <p id="c-msg" class="c-msg small"></p>
+      <footer class="composer-foot">
+        <span class="muted small">⌘ / Ctrl + Enter 로 저장</span>
+        <div class="row">
+          <button type="button" id="c-cancel" class="ghost">취소</button>
+          <button type="submit" id="c-save">저장</button>
+        </div>
+      </footer>
+    </form>
+  </aside>
+
   <!-- 사진 슬라이드쇼 -->
   <div id="viewer" class="viewer hidden" role="dialog" aria-modal="true" aria-label="사진 보기">
     <button id="v-close" class="v-btn v-close" aria-label="닫기 (Esc)">✕</button>
