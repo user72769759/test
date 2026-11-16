@@ -477,10 +477,49 @@ async function uploadFiles(rawFiles) {
 }
 $("file-input").onchange = (e) => { uploadFiles([...e.target.files]); e.target.value = ""; };
 
-const drop = $("drop");
-drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
-drop.ondragleave = () => drop.classList.remove("over");
-drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); uploadFiles([...e.dataTransfer.files]); };
+// 드래그 앤 드롭: 페이지 어디에 놓아도 업로드 (브라우저가 파일을 열어 버리는 기본 동작 차단)
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+// 지금 화면에서 업로드할 수 있는지 (보관함 화면, 휴지통 아님, 다른 창이 열려 있지 않음)
+const canDropHere = () =>
+  !!state.user && !inTrash() && !$("library").classList.contains("hidden") && !isViewerOpen() && !isComposerOpen();
+let dragDepth = 0;
+const showDropOverlay = (on) => {
+  if (on) {
+    const f = targetFolder();
+    $("drop-overlay-sub").textContent = f
+      ? `'${folderName(f)}' 폴더에 저장돼요 · 파일당 20MB까지`
+      : "AI가 주제별 폴더로 정리해요 · 파일당 20MB까지";
+  }
+  $("drop-overlay").classList.toggle("hidden", !on);
+  $("drop").classList.toggle("over", on);
+};
+
+window.addEventListener("dragenter", (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragDepth++;
+  if (canDropHere()) showDropOverlay(true);
+});
+window.addEventListener("dragover", (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault(); // 이게 없으면 브라우저가 파일을 새 화면으로 열어 버림
+  e.dataTransfer.dropEffect = canDropHere() ? "copy" : "none";
+});
+window.addEventListener("dragleave", (e) => {
+  if (!hasFiles(e)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) showDropOverlay(false);
+});
+window.addEventListener("drop", (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  showDropOverlay(false);
+  if (!state.user) return;
+  if (inTrash()) return toast("휴지통에서는 올릴 수 없어요. 다른 폴더로 이동해서 올려 주세요");
+  if (!canDropHere()) return;
+  uploadFiles([...e.dataTransfer.files]);
+});
 
 async function loadAll() { await loadFolders(); select(state.current); }
 
