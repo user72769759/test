@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>humane archive</title>
-  <meta name="description" content="글·사진·영상·음악을 올리면 AI가 주제별로 정리해 주는 나만의 아카이브" />
+  <meta name="description" content="글·사진·영상·음악을 주제별 폴더로 정리하는 나만의 아카이브" />
   <meta name="theme-color" content="#b4583a" />
   <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -14,7 +14,7 @@
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="humane archive" />
   <meta property="og:title" content="humane archive" />
-  <meta property="og:description" content="글·사진·영상·음악을 올리면 AI가 주제별로 정리해 주는 나만의 아카이브" />
+  <meta property="og:description" content="글·사진·영상·음악을 주제별 폴더로 정리하는 나만의 아카이브" />
   <meta property="og:url" content="https://humanearchive.com/" />
   <meta property="og:image" content="https://humanearchive.com/og-image.png" />
   <meta property="og:image:width" content="1200" />
@@ -23,7 +23,7 @@
   <meta property="og:locale" content="ko_KR" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="humane archive" />
-  <meta name="twitter:description" content="글·사진·영상·음악을 올리면 AI가 주제별로 정리해 주는 나만의 아카이브" />
+  <meta name="twitter:description" content="글·사진·영상·음악을 주제별 폴더로 정리하는 나만의 아카이브" />
   <meta name="twitter:image" content="https://humanearchive.com/og-image.png" />
   <!-- 세리프 글꼴: 한글 고운바탕 + 영문 Cormorant Garamond -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -120,11 +120,7 @@
             <div class="usage-row"><span>저장 공간</span><span id="u-storage-text" class="muted small"></span></div>
             <div class="bar"><div id="u-storage-fill" class="bar-fill"></div></div>
           </div>
-          <div class="usage">
-            <div class="usage-row"><span>오늘 AI 분류</span><span id="u-ai-text" class="muted small"></span></div>
-            <div class="bar"><div id="u-ai-fill" class="bar-fill"></div></div>
-          </div>
-          <p class="muted small">AI 분류는 매일 오전 9시에 다시 채워져요. 휴지통의 항목도 저장 공간을 차지해요.</p>
+          <p class="muted small">휴지통의 항목도 저장 공간을 차지해요.</p>
         </section>
 
         <section class="panel">
@@ -166,16 +162,14 @@
           <button id="empty-trash" class="danger-btn">휴지통 비우기</button>
         </div>
         <div id="lib-actions" class="row">
-          <button id="auto-classify" class="ghost" title="아직 정리되지 않은 항목만 AI가 주제별 폴더로 정리">✨ 자동 분류</button>
           <button id="add-note" class="ghost">글 쓰기</button>
-          <button id="add-link" class="ghost">링크 저장</button>
           <label class="btn">파일 올리기
             <input id="file-input" type="file" multiple accept="image/*,video/*,audio/*,.pdf,.txt" hidden />
           </label>
         </div>
         </div>
       </header>
-      <div id="drop" class="drop">여기에 파일을 끌어다 놓으세요 · '전체'에서 올리면 AI가 주제별 폴더로 자동 정리해요</div>
+      <div id="drop" class="drop">여기에 파일을 끌어다 놓거나 ⌘V로 붙여넣으세요 · 폴더를 열고 올리면 그 폴더에 저장돼요</div>
       <div id="grid" class="grid"></div>
       <p id="empty" class="muted center hidden">아직 저장된 항목이 없어요.</p>
       </div>
@@ -208,9 +202,8 @@
         <h2 id="composer-heading">새 글</h2>
         <button type="button" id="composer-close" class="composer-x" aria-label="닫기 (Esc)">✕</button>
       </header>
-      <input id="c-url" class="c-url hidden" type="url" placeholder="https://" autocomplete="off" />
       <input id="c-title" class="c-title" placeholder="제목" maxlength="200" autocomplete="off" />
-      <textarea id="c-body" class="c-body" placeholder="떠오르는 생각을 자유롭게 적어 보세요"></textarea>
+      <textarea id="c-body" class="c-body" placeholder="떠오르는 생각을 자유롭게 적어 보세요. 링크도 그냥 붙여넣으면 돼요"></textarea>
       <label class="c-folder">저장 위치
         <select id="c-folder"></select>
       </label>
@@ -232,7 +225,16 @@
   <div id="viewer" class="viewer hidden" role="dialog" aria-modal="true" aria-label="사진 보기">
     <button id="v-close" class="v-btn v-close" aria-label="닫기 (Esc)">✕</button>
     <button id="v-prev" class="v-btn v-prev" aria-label="이전 사진 (←)">‹</button>
-    <div class="v-stage"><img id="v-img" alt="" /></div>
+    <div class="v-stage">
+      <img id="v-img" alt="" />
+      <!-- 글: 메모장 모양 그대로 보이고 바로 수정 (자동 저장) -->
+      <div id="v-note" class="v-note hidden">
+        <input id="vn-title" class="c-title vn-title" placeholder="제목" maxlength="200" autocomplete="off" />
+        <textarea id="vn-body" class="c-body vn-body" placeholder="내용을 적어 보세요"></textarea>
+        <div id="vn-links" class="vn-links hidden"></div>
+        <div id="vn-status" class="vn-status small"></div>
+      </div>
+    </div>
     <button id="v-next" class="v-btn v-next" aria-label="다음 사진 (→)">›</button>
     <div class="v-bar">
       <div class="v-info"><div id="v-title" class="v-title"></div><div id="v-sub" class="small"></div></div>

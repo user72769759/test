@@ -7,7 +7,7 @@ const $ = (id) => document.getElementById(id);
 // current: null = 전체(모든 항목, 정리 안 된 항목이 맨 위), "trash" = 휴지통, 그 외 = 폴더 id
 const state = { user: null, folders: [], current: null, items: [], urls: {}, selecting: false, selected: new Set() };
 const inTrash = () => state.current === "trash";
-// 새 항목이 들어갈 폴더 (전체 화면에서는 폴더 없음 → AI 자동 분류 대상)
+// 새 항목이 들어갈 폴더 (전체 화면에서는 폴더 없음 = 정리 안 됨)
 const targetFolder = () => (state.current === null || inTrash() ? null : state.current);
 const folderName = (id) => state.folders.find((f) => f.id === id)?.name;
 
@@ -244,8 +244,7 @@ function startRename(f, span) {
   input.onclick = (e) => e.stopPropagation();
 }
 
-// ---------- AI 자동 분류 ----------
-// 사진을 작은 JPEG로 줄임 (AI 전송·프로필 사진용)
+// ---------- 이미지 줄이기 (프로필 사진용) ----------
 async function makeThumb(src, maxSize = 640) {
   const url = typeof src === "string" ? src : URL.createObjectURL(src);
   try {
@@ -264,75 +263,6 @@ async function makeThumb(src, maxSize = 640) {
     if (typeof src !== "string") URL.revokeObjectURL(url);
   }
 }
-
-async function classifyItem(item, imageSrc) {
-  const image = item.kind === "image" && imageSrc ? await makeThumb(imageSrc) : null;
-  const topics = childrenOf(null).map((f) => f.name);
-  const { data: { session } } = await sb.auth.getSession();
-  const res = await fetch("/api/classify", {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${session.access_token}` },
-    body: JSON.stringify({ kind: item.kind, title: item.title, body: item.body, url: item.url, image, topics }),
-  });
-  const out = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const err = new Error(out.error || `HTTP ${res.status}`);
-    err.quota = out.code === "quota";
-    throw err;
-  }
-
-  let folder = childrenOf(null).find((f) => f.name === out.topic);
-  if (!folder) {
-    const { data, error } = await sb.from("folders").insert({ name: out.topic, parent_id: null }).select().single();
-    if (error) throw error;
-    folder = data;
-    state.folders.push(data);
-  }
-  const { error } = await sb.from("items").update({ folder_id: folder.id }).eq("id", item.id);
-  if (error) throw error;
-  return out.topic;
-}
-
-// pairs: [{ item, imageSrc }] — 하나씩 순서대로 분류
-async function classifyMany(pairs) {
-  const btn = $("auto-classify");
-  btn.disabled = true;
-  let done = 0, failed = 0, lastError = "", quotaHit = false;
-  for (const { item, imageSrc } of pairs) {
-    const n = done + failed;
-    progress.show(`✨ AI가 분류 중 ${n + 1}/${pairs.length}`, item.title, n / pairs.length);
-    try { await classifyItem(item, imageSrc); done++; }
-    catch (e) {
-      console.error(e);
-      if (e.quota) { quotaHit = true; break; } // 한도 초과: 남은 항목은 '정리 안 됨'으로 둠
-      lastError = e.message; failed++;
-    }
-    renderTree();
-  }
-  const left = pairs.length - done - failed;
-  if (quotaHit) progress.done(`오늘 AI 분류 한도(30건)를 다 썼어요. ${left}개는 '정리 안 됨'으로 두었다가 오전 9시 이후 ✨ 자동 분류로 이어서 정리하세요`, true);
-  else progress.done(failed
-    ? `${done}개 정리 · ${failed}개 실패 (${lastError})`
-    : `✨ ${done}개를 주제별로 정리했어요`, !!failed);
-  btn.disabled = false;
-  await loadFolders();
-  renderTree();
-  loadItems();
-}
-
-// 자동 분류: 어느 화면에서 눌러도 '정리 안 된 항목'(폴더 없음)만 AI가 주제별 폴더로 정리
-$("auto-classify").onclick = async () => {
-  const { data, error } = await sb.from("items").select("*").is("deleted_at", null).is("folder_id", null);
-  if (error) return alert(error.message);
-  if (!data.length) return toast("정리 안 된 항목이 없어요. 모두 폴더에 들어가 있어요");
-  const paths = data.filter((i) => i.kind === "image" && i.file_path).map((i) => i.file_path);
-  const urls = {};
-  if (paths.length) {
-    const { data: signed } = await sb.storage.from("uploads").createSignedUrls(paths, 600);
-    for (const s of signed ?? []) urls[s.path] = s.signedUrl;
-  }
-  classifyMany(data.map((item) => ({ item, imageSrc: urls[item.file_path] })));
-};
 
 // ---------- 항목 ----------
 async function loadItems() {
@@ -411,13 +341,13 @@ function renderItems(items, urls) {
       // PC: Shift + 클릭 → 선택 모드를 켜고 이 항목 선택
       if (e.shiftKey && !state.selecting) { e.preventDefault(); setSelecting(true); }
       if (state.selecting) { e.preventDefault(); toggleSelect(it.id, card); return; }
-      if (isPhoto && !e.target.closest("a, button")) openViewer(it.id);
+      if ((isPhoto || isNote(it)) && !e.target.closest("a, button")) openViewer(it.id);
     };
     card.onkeydown = (e) => {
       if (e.key !== "Enter" && e.key !== " ") return;
       e.preventDefault();
       if (state.selecting) toggleSelect(it.id, card);
-      else if (isPhoto) openViewer(it.id);
+      else if (isPhoto || isNote(it)) openViewer(it.id);
     };
     grid.append(card);
   }
@@ -483,7 +413,6 @@ $("empty-trash").onclick = async () => {
 };
 
 $("add-note").onclick = () => openComposer("note");
-$("add-link").onclick = () => openComposer("link");
 
 // supabase-js 업로드는 진행률을 알려주지 않아서, 같은 저장소 API를 XHR로 직접 호출
 async function uploadWithProgress(path, file, onProgress) {
@@ -585,8 +514,7 @@ async function uploadFiles(rawFiles) {
   if (failed.length) progress.done(`${added.length}개 업로드 · ${failed.length}개 못 올림: ${failed[0]}`, true);
   else progress.done(`${added.length}개 업로드 완료`);
   // 전체에 올린 경우에만 자동 분류 (특정 폴더에 올리면 그대로 둠)
-  if (folderId === null && added.length) { loadItems(); classifyMany(added); }
-  else loadItems();
+  loadItems();
 }
 $("file-input").onchange = (e) => { uploadFiles([...e.target.files]); e.target.value = ""; };
 
@@ -601,7 +529,7 @@ const showDropOverlay = (on) => {
     const f = targetFolder();
     $("drop-overlay-sub").textContent = f
       ? `'${folderName(f)}' 폴더에 저장돼요 · 파일당 20MB까지`
-      : "AI가 주제별 폴더로 정리해요 · 파일당 20MB까지";
+      : "'전체'에 정리 안 된 항목으로 올라가요 · 파일당 20MB까지";
   }
   $("drop-overlay").classList.toggle("hidden", !on);
   $("drop").classList.toggle("over", on);
@@ -656,10 +584,9 @@ async function renderUsage() {
     const u = await getUsage();
     $("u-storage-text").textContent = `${mb(u.storage_used)} / ${mb(u.storage_limit)}`;
     $("u-storage-fill").style.width = Math.min(100, (u.storage_used / u.storage_limit) * 100) + "%";
-    $("u-ai-text").textContent = `${u.ai_used_today} / ${u.ai_limit}건`;
-    $("u-ai-fill").style.width = Math.min(100, (u.ai_used_today / u.ai_limit) * 100) + "%";
+
   } catch {
-    $("u-storage-text").textContent = $("u-ai-text").textContent = "확인하지 못했어요";
+    $("u-storage-text").textContent = "확인하지 못했어요";
   }
 }
 
@@ -757,7 +684,7 @@ $("delete-form").onsubmit = async (e) => {
   }
 };
 
-// ---------- 진행 상황 패널 (업로드·AI 분류 공용) ----------
+// ---------- 진행 상황 패널 (업로드) ----------
 const progress = {
   timer: null,
   show(label, sub = "", fraction = null) {
@@ -804,7 +731,7 @@ function folderOptions() {
 }
 
 function openViewer(id) {
-  viewer.list = state.items.filter((i) => i.kind === "image" && state.urls[i.file_path]);
+  viewer.list = state.items.filter((i) => (i.kind === "image" && state.urls[i.file_path]) || isNote(i));
   viewer.i = Math.max(0, viewer.list.findIndex((x) => x.id === id));
   viewer.dirty = false;
   $("viewer").classList.remove("hidden");
@@ -818,6 +745,7 @@ function openViewer(id) {
 }
 
 function closeViewer() {
+  flushNoteSave();
   $("viewer").classList.add("hidden");
   $("v-img").removeAttribute("src");
   document.body.style.overflow = "";
@@ -826,12 +754,25 @@ function closeViewer() {
 }
 
 function showSlide() {
+  flushNoteSave();
   if (!viewer.list.length) return closeViewer();
   viewer.i = Math.min(Math.max(viewer.i, 0), viewer.list.length - 1);
   const it = viewer.list[viewer.i];
-  $("v-img").src = state.urls[it.file_path];
-  $("v-img").alt = it.title;
-  $("v-title").textContent = it.title || "(제목 없음)";
+  const note = isNote(it);
+  $("v-img").classList.toggle("hidden", note);
+  $("v-note").classList.toggle("hidden", !note);
+  if (note) {
+    $("v-img").removeAttribute("src");
+    $("vn-title").value = it.title || "";
+    $("vn-body").value = it.body || "";
+    $("vn-title").readOnly = $("vn-body").readOnly = inTrash();
+    $("vn-status").textContent = inTrash() ? "휴지통에 있는 글은 복원한 뒤 수정할 수 있어요" : "";
+    renderNoteLinks(it.body);
+  } else {
+    $("v-img").src = state.urls[it.file_path];
+    $("v-img").alt = it.title;
+  }
+  $("v-title").textContent = note ? (it.title || "글") : (it.title || "(제목 없음)");
   $("v-sub").textContent = `${viewer.i + 1} / ${viewer.list.length} · ${new Date(it.created_at).toLocaleDateString("ko-KR")}`;
   $("v-folder-label").textContent = folderName(it.folder_id) ?? "정리 안 됨";
   $("v-prev").disabled = viewer.i === 0;
@@ -839,7 +780,7 @@ function showSlide() {
   // 앞뒤 사진 미리 불러오기
   for (const j of [viewer.i - 1, viewer.i + 1]) {
     const n = viewer.list[j];
-    if (n) new Image().src = state.urls[n.file_path];
+    if (n && !isNote(n)) new Image().src = state.urls[n.file_path];
   }
 }
 
@@ -988,35 +929,27 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && state.selecting && !isViewerOpen() && !isComposerOpen()) setSelecting(false);
 });
 
-// ---------- 글쓰기 · 링크 저장 패널 ----------
-const composer = { mode: "note", saving: false };
+// ---------- 글쓰기 패널 (링크도 본문에 그냥 적으면 돼요) ----------
+const composer = { saving: false };
 const isComposerOpen = () => $("composer").classList.contains("open");
-const AUTO = "__auto";
 
-function openComposer(mode) {
-  composer.mode = mode;
-  const isLink = mode === "link";
-  $("composer-heading").textContent = isLink ? "링크 저장" : "새 글";
-  $("c-url").classList.toggle("hidden", !isLink);
-  $("c-url").required = isLink;
-  $("c-title").placeholder = isLink ? "제목 (비워 두면 링크 주소로 저장돼요)" : "제목";
-  $("c-body").placeholder = isLink ? "이 링크에 대한 메모 (선택)" : "떠오르는 생각을 자유롭게 적어 보세요";
-  $("c-title").value = $("c-body").value = $("c-url").value = "";
+function openComposer() {
+  $("c-title").value = $("c-body").value = "";
   $("c-msg").textContent = "";
   const sel = $("c-folder");
   sel.replaceChildren(
-    el("option", { value: AUTO, textContent: "✨ AI가 알아서 분류" }),
+    el("option", { value: "", textContent: "폴더 없이 (정리 안 됨)" }),
     ...folderOptions().filter(([v]) => v).map(([v, t]) => el("option", { value: v, textContent: t })),
   );
-  sel.value = targetFolder() ?? AUTO;
+  sel.value = targetFolder() ?? "";
   $("composer").classList.add("open");
   $("composer").setAttribute("aria-hidden", "false");
   $("composer-backdrop").classList.remove("hidden");
-  setTimeout(() => (isLink ? $("c-url") : $("c-title")).focus(), 180);
+  setTimeout(() => $("c-title").focus(), 180);
 }
 
 function closeComposer(force = false) {
-  const dirty = $("c-title").value.trim() || $("c-body").value.trim() || $("c-url").value.trim();
+  const dirty = $("c-title").value.trim() || $("c-body").value.trim();
   if (!force && dirty && !confirm("작성 중인 내용이 사라져요. 닫을까요?")) return;
   $("composer").classList.remove("open");
   $("composer").setAttribute("aria-hidden", "true");
@@ -1030,27 +963,18 @@ $("composer-backdrop").onclick = () => closeComposer();
 $("composer-form").onsubmit = async (e) => {
   e.preventDefault();
   if (composer.saving) return;
-  const isLink = composer.mode === "link";
   const title = $("c-title").value.trim();
   const body = $("c-body").value.trim();
-  const url = $("c-url").value.trim();
-  if (isLink && !/^https?:\/\/\S+/.test(url)) return ($("c-msg").textContent = "http:// 또는 https:// 로 시작하는 주소를 넣어 주세요.");
-  if (!isLink && !title && !body) return ($("c-msg").textContent = "제목이나 내용을 적어 주세요.");
-  const choice = $("c-folder").value;
-  const auto = choice === AUTO;
-  const row = isLink
-    ? { kind: "link", url, title: title || url, body: body || null, folder_id: auto ? null : choice || null }
-    : { kind: "note", title, body, folder_id: auto ? null : choice || null };
+  if (!title && !body) return ($("c-msg").textContent = "제목이나 내용을 적어 주세요.");
   composer.saving = true;
   $("c-save").disabled = true;
-  const { data, error } = await sb.from("items").insert(row).select().single();
+  const { error } = await sb.from("items").insert({ kind: "note", title, body, folder_id: $("c-folder").value || null });
   composer.saving = false;
   $("c-save").disabled = false;
   if (error) return ($("c-msg").textContent = "저장하지 못했어요: " + error.message);
   closeComposer(true);
-  toast(isLink ? "링크를 저장했어요" : "글을 저장했어요");
-  if (auto) classifyMany([{ item: data }]);
-  else loadItems();
+  toast("글을 저장했어요");
+  loadItems();
 };
 
 document.addEventListener("keydown", (e) => {
@@ -1282,4 +1206,57 @@ document.addEventListener("paste", (e) => {
 // Windows/Linux에서는 단축키 안내를 Ctrl로 표시
 if (!/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) {
   for (const n of document.querySelectorAll(".shortcut-hint")) n.textContent = n.textContent.replaceAll("⌘", "Ctrl+");
+}
+
+// ---------- 슬라이드쇼의 글 (메모장처럼 보이고 바로 수정) ----------
+function isNote(it) { return it && (it.kind === "note" || it.kind === "link"); }
+
+const noteSave = { timer: null, item: null };
+const URL_RE = /https?:\/\/[^\s<>"')]+/g;
+
+// 본문 속 링크를 아래에 눌러서 열 수 있게 표시
+function renderNoteLinks(text) {
+  const links = [...new Set(String(text || "").match(URL_RE) || [])].slice(0, 8);
+  const box = $("vn-links");
+  box.replaceChildren(...links.map((u) => el("a", { href: u, target: "_blank", rel: "noopener noreferrer", className: "vn-link", textContent: "↗ " + u.replace(/^https?:\/\//, "") })));
+  box.classList.toggle("hidden", !links.length);
+}
+
+async function saveNote(it) {
+  const title = $("vn-title").value.trim();
+  const body = $("vn-body").value;
+  if (title === (it.title || "") && body === (it.body || "")) return;
+  $("vn-status").textContent = "저장 중…";
+  const { error } = await sb.from("items").update({ title, body, kind: "note" }).eq("id", it.id);
+  if (error) { $("vn-status").textContent = "저장하지 못했어요: " + error.message; return; }
+  it.title = title; it.body = body; it.kind = "note";
+  viewer.dirty = true;
+  if (viewer.list[viewer.i] === it) {
+    $("vn-status").textContent = "저장됨";
+    $("v-title").textContent = title || "글";
+  }
+}
+function scheduleNoteSave() {
+  const it = viewer.list[viewer.i];
+  if (!isNote(it) || inTrash()) return;
+  noteSave.item = it;
+  $("vn-status").textContent = "수정 중…";
+  clearTimeout(noteSave.timer);
+  noteSave.timer = setTimeout(() => { noteSave.timer = null; saveNote(it); }, 700);
+}
+// 다른 슬라이드로 넘기거나 닫기 전에 남은 수정 바로 저장
+function flushNoteSave() {
+  if (!noteSave.timer || !noteSave.item) return;
+  clearTimeout(noteSave.timer);
+  noteSave.timer = null;
+  const it = noteSave.item;
+  if (viewer.list[viewer.i] === it) saveNote(it);
+}
+$("vn-title").addEventListener("input", scheduleNoteSave);
+$("vn-body").addEventListener("input", () => { scheduleNoteSave(); renderNoteLinks($("vn-body").value); });
+for (const id of ["vn-title", "vn-body"]) {
+  $(id).addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); e.target.blur(); } // 첫 Esc는 글쓰기만 멈춤
+    if (e.key === "Enter" && e.target.id === "vn-title") { e.preventDefault(); $("vn-body").focus(); }
+  });
 }
