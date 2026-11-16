@@ -85,9 +85,62 @@
         </button>
         <button id="signout" class="ghost small-btn">로그아웃</button>
       </div>
+      <button id="open-help" type="button" class="help-btn">
+        <span class="help-icon" aria-hidden="true">?</span> 도움말 및 단축키
+      </button>
     </aside>
 
     <main class="main">
+      <!-- 도움말 및 단축키 -->
+      <div id="help" class="settings help hidden">
+        <header class="topbar"><div class="crumbs">도움말 및 단축키</div>
+          <button id="close-help" class="ghost">← 보관함으로</button></header>
+
+        <section class="panel">
+          <h2>기본 사용법</h2>
+          <ul class="help-list">
+            <li><b>올리기</b> — '파일 올리기'를 누르거나, 파일을 화면 어디에나 끌어다 놓거나, 캡처한 이미지를 붙여넣으면 돼요.</li>
+            <li><b>저장 위치</b> — 폴더를 열고 올리면 그 폴더에, '전체'에서 올리면 <span class="help-tag">정리 안 됨</span>으로 맨 위에 쌓여요.</li>
+            <li><b>글</b> — '글 쓰기'로 메모를 남겨요. 링크도 본문에 그냥 붙여넣으면 돼요.</li>
+            <li><b>보기·수정</b> — 사진·영상·음악·글을 누르면 슬라이드쇼로 크게 보고, 글은 그 자리에서 바로 고칠 수 있어요.</li>
+            <li><b>정리</b> — '선택'(또는 Shift + 클릭)으로 여러 개를 골라 폴더로 옮기거나 지워요. 지운 항목은 휴지통에서 복원할 수 있어요.</li>
+          </ul>
+        </section>
+
+        <section class="panel">
+          <h2>보관함 단축키</h2>
+          <dl class="keys">
+            <dt><kbd class="k">Shift</kbd> + 클릭</dt><dd>선택 모드를 켜고 그 항목 선택</dd>
+            <dt><kbd class="k">⌘</kbd> <kbd>X</kbd></dt><dd>선택한 항목을 휴지통으로 (휴지통에서는 영구 삭제)</dd>
+            <dt><kbd class="k">⌘</kbd> <kbd>C</kbd></dt><dd>선택한 항목 복사</dd>
+            <dt><kbd class="k">⌘</kbd> <kbd>V</kbd></dt><dd>복사한 항목을 지금 폴더에 붙여넣기 · 캡처한 이미지는 바로 올리기</dd>
+            <dt><kbd class="k">⌘</kbd> <kbd>Z</kbd></dt><dd>되돌리기 (삭제 · 이동 · 붙여넣기 · 폴더 이름 변경)</dd>
+            <dt><kbd>Esc</kbd></dt><dd>선택 모드 끝내기</dd>
+            <dt>폴더 이름 더블클릭</dt><dd>폴더 이름 바꾸기 (<kbd>Enter</kbd> 저장 · <kbd>Esc</kbd> 취소)</dd>
+          </dl>
+        </section>
+
+        <section class="panel">
+          <h2>슬라이드쇼 단축키</h2>
+          <dl class="keys">
+            <dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>이전 · 다음</dd>
+            <dt><kbd>Space</kbd></dt><dd>음악 · 영상 재생 / 일시정지</dd>
+            <dt><kbd class="k">Shift</kbd> + <kbd>←</kbd> <kbd>→</kbd></dt><dd>음악 · 영상 5초 이동</dd>
+            <dt><kbd class="k">⌘</kbd> <kbd>X</kbd> · <kbd class="k">⌘</kbd> <kbd>C</kbd></dt><dd>지금 보는 항목 휴지통으로 · 복사</dd>
+            <dt><kbd>Esc</kbd></dt><dd>글 수정 멈추기 → 한 번 더 누르면 닫기</dd>
+          </dl>
+        </section>
+
+        <section class="panel">
+          <h2>글쓰기</h2>
+          <dl class="keys">
+            <dt><kbd class="k">⌘</kbd> <kbd>Enter</kbd></dt><dd>저장</dd>
+            <dt><kbd>Esc</kbd></dt><dd>닫기 (쓰던 내용이 있으면 한 번 확인)</dd>
+          </dl>
+        </section>
+        <p class="muted small help-foot">Windows에서는 <kbd>⌘</kbd> 대신 <kbd>Ctrl</kbd>을 눌러요.</p>
+      </div>
+
       <!-- 계정 설정 -->
       <div id="settings" class="settings hidden">
         <header class="topbar"><div class="crumbs">계정 설정</div>
@@ -154,7 +207,6 @@
           <button id="sel-restore" class="ghost hidden">복원</button>
           <button id="sel-delete" class="danger-btn">삭제</button>
           <button id="sel-cancel" class="ghost">취소</button>
-          <span class="shortcut-hint">⌘X 삭제 · ⌘C 복사 · ⌘V 붙여넣기 · ⌘Z 되돌리기</span>
         </div>
         <button id="sort-btn" type="button" class="ghost menu-btn" aria-haspopup="menu" aria-label="정렬"><span id="sort-label">최신순</span> <span class="caret">▾</span></button>
         <button id="select-btn" class="ghost">선택</button>

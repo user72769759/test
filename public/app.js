@@ -200,10 +200,11 @@ async function deleteFolder(f) {
   else { renderTree(); loadItems(); }
 }
 
-const isSettingsOpen = () => !$("settings").classList.contains("hidden");
+// 계정 설정이나 도움말이 열려 있는지
+const isSettingsOpen = () => !$("settings").classList.contains("hidden") || !$("help").classList.contains("hidden");
 
 function select(id) {
-  if (isSettingsOpen()) showSettings(false); // 사이드바를 누르면 계정 설정을 닫고 그 화면으로
+  if (isSettingsOpen()) showPage(null); // 사이드바를 누르면 계정 설정·도움말을 닫고 그 화면으로
   state.current = id;
   setSelecting(false);
   $("lib-actions").classList.toggle("hidden", inTrash());
@@ -615,9 +616,20 @@ async function renderProfile() {
   paintAvatar($("side-avatar"), url);
   paintAvatar($("set-avatar"), url);
 }
+// 보관함 대신 보여주는 화면: 계정 설정 · 도움말 (하나만 열림)
+function showPage(name) {
+  $("settings").classList.toggle("hidden", name !== "settings");
+  $("help").classList.toggle("hidden", name !== "help");
+  $("library").classList.toggle("hidden", !!name);
+  document.querySelector(".main").scrollTop = 0;
+  window.scrollTo(0, 0);
+}
+function showHelp(on) { showPage(on ? "help" : null); }
+$("open-help").onclick = () => showHelp(true);
+$("close-help").onclick = () => showHelp(false);
+
 function showSettings(on) {
-  $("settings").classList.toggle("hidden", !on);
-  $("library").classList.toggle("hidden", on);
+  showPage(on ? "settings" : null);
   $("delete-confirm").value = "";
   say("");
 }
@@ -1245,7 +1257,7 @@ document.addEventListener("paste", (e) => {
 
 // Windows/Linux에서는 단축키 안내를 Ctrl로 표시
 if (!/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) {
-  for (const n of document.querySelectorAll(".shortcut-hint")) n.textContent = n.textContent.replaceAll("⌘", "Ctrl+");
+  for (const n of document.querySelectorAll("kbd.k")) if (n.textContent === "⌘") n.textContent = "Ctrl";
 }
 
 // ---------- 슬라이드쇼의 글 (메모장처럼 보이고 바로 수정) ----------

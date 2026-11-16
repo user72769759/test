@@ -309,10 +309,6 @@ button, .btn { white-space: nowrap; flex-shrink: 0; }
   border: 1px solid var(--accent) !important; background: var(--field) !important;
 }
 
-/* 선택 모드 단축키 안내 (PC에서만) */
-.shortcut-hint { color: var(--muted); font-size: 12px; }
-@media (max-width: 720px), (hover: none) { .shortcut-hint { display: none; } }
-
 /* 폴더 이동 목록의 '+ 새 폴더' 입력칸 */
 .newfolder { display: inline-flex; align-items: center; gap: 6px; }
 .newfolder-input {
@@ -494,3 +490,30 @@ button, .btn { white-space: nowrap; flex-shrink: 0; }
 /* 정렬 메뉴 */
 .fm-sub { font-size: 12px; color: var(--muted); font-weight: 400; }
 #sort-btn { white-space: nowrap; }
+
+/* ---------- 도움말 및 단축키 ---------- */
+.help-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 2px; padding: 6px 4px;
+  background: none !important; border: none; color: var(--muted); font-size: 13px; text-align: left;
+}
+.help-btn:hover { color: var(--accent); }
+.help-icon {
+  display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; flex: none;
+  border: 1px solid currentColor; font-size: 12px; font-weight: 700; font-family: var(--font-display);
+}
+.help .panel h2 { margin-bottom: 2px; }
+.help-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; line-height: 1.6; }
+.help-tag { font-size: 12px; background: var(--accent); color: var(--field); padding: 1px 7px; border-radius: 999px; }
+.keys { display: grid; grid-template-columns: max-content 1fr; gap: 9px 18px; margin: 0; font-size: 14px; align-items: baseline; }
+.keys dt { white-space: nowrap; color: var(--text); }
+.keys dd { margin: 0; color: var(--muted); }
+kbd {
+  display: inline-block; min-width: 22px; padding: 2px 7px; border-radius: 6px; text-align: center;
+  font-family: var(--font-body); font-size: 12px; line-height: 1.4; color: var(--text);
+  background: var(--field); border: 1px solid var(--line); box-shadow: 0 1px 0 var(--line);
+}
+.help-foot { margin: 4px 0 24px; }
+@media (max-width: 720px) {
+  .keys { grid-template-columns: 1fr; gap: 2px; }
+  .keys dd { margin-bottom: 8px; }
+}
