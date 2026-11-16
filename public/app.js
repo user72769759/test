@@ -72,6 +72,7 @@ function renderTree() {
   const tree = $("tree");
   tree.replaceChildren();
   const root = el("div", { className: "node" + (state.current === null ? " active" : ""), textContent: "전체" });
+  root.dataset.key = "all";
   root.onclick = () => select(null);
   tree.append(root);
   // 폴더는 1단계만 (하위 폴더 없음)
@@ -79,10 +80,14 @@ function renderTree() {
     const del = el("button", { className: "folder-del", title: `'${f.name}' 폴더 삭제`, textContent: "삭제" });
     del.onclick = (e) => { e.stopPropagation(); deleteFolder(f); };
     const node = el("div", { className: "node" + (state.current === f.id ? " active" : "") }, el("span", { className: "node-name", textContent: f.name }), del);
-    node.onclick = () => select(f.id);
+    node.dataset.key = f.id;
+    node.onclick = (e) => { if (e.target.tagName !== "INPUT" && state.current !== f.id) select(f.id); };
+    // PC: 폴더 이름 더블클릭 → 이름 바꾸기 (Enter 저장, Esc 취소)
+    node.querySelector(".node-name").ondblclick = (e) => { e.stopPropagation(); startRename(f, e.currentTarget); };
     tree.append(node);
   }
   const trash = el("div", { className: "node trash-node" + (inTrash() ? " active" : ""), textContent: "휴지통" });
+  trash.dataset.key = "trash";
   trash.onclick = () => select("trash");
   tree.append(trash);
 }
@@ -139,7 +144,49 @@ function select(id) {
   $("lib-actions").classList.toggle("hidden", inTrash());
   $("drop").classList.toggle("hidden", inTrash());
   $("trash-actions").classList.toggle("hidden", !inTrash());
-  renderTree(); renderCrumbs(); loadItems();
+  // 사이드바는 다시 그리지 않고 선택 표시만 바꿈 (더블클릭이 끊기지 않도록)
+  const key = id === null ? "all" : id;
+  const nodes = document.querySelectorAll("#tree .node");
+  if (nodes.length && [...nodes].some((n) => n.dataset.key === key)) {
+    for (const n of nodes) n.classList.toggle("active", n.dataset.key === key);
+  } else renderTree();
+  renderCrumbs(); loadItems();
+}
+
+function startRename(f, span) {
+  const input = el("input", { className: "rename-input", value: f.name, maxLength: 50 });
+  span.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return;
+    done = true;
+    const name = input.value.trim();
+    if (!save || !name || name === f.name) return renderTree();
+    if (childrenOf(null).some((x) => x.id !== f.id && x.name === name)) {
+      toast(`'${name}' 폴더가 이미 있어요`);
+      return renderTree();
+    }
+    const old = f.name;
+    const { error } = await sb.from("folders").update({ name }).eq("id", f.id);
+    if (error) { alert(error.message); return renderTree(); }
+    f.name = name;
+    pushUndo("폴더 이름 변경", async () => {
+      await sb.from("folders").update({ name: old }).eq("id", f.id);
+      f.name = old;
+      renderTree(); renderCrumbs(); loadItems();
+    });
+    toast(`폴더 이름을 '${name}'(으)로 바꿨어요`);
+    renderTree(); renderCrumbs(); loadItems();
+  };
+  input.onkeydown = (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  };
+  input.onblur = () => finish(false);
+  input.onclick = (e) => e.stopPropagation();
 }
 
 // ---------- AI 자동 분류 ----------
@@ -306,6 +353,8 @@ function renderItems(items, urls) {
           actions)));
     card.dataset.id = it.id;
     card.onclick = (e) => {
+      // PC: Shift + 클릭 → 선택 모드를 켜고 이 항목 선택
+      if (e.shiftKey && !state.selecting) { e.preventDefault(); setSelecting(true); }
       if (state.selecting) { e.preventDefault(); toggleSelect(it.id, card); return; }
       if (isPhoto && !e.target.closest("a, button")) openViewer(it.id);
     };
@@ -323,10 +372,11 @@ function renderItems(items, urls) {
 async function moveToTrash(it, { reload = true } = {}) {
   const { error } = await sb.from("items").update({ deleted_at: new Date().toISOString() }).eq("id", it.id);
   if (error) { alert(error.message); return false; }
-  toast("휴지통으로 옮겼어요", "되돌리기", async () => {
+  const undo = pushUndo("휴지통으로 이동", async () => {
     await sb.from("items").update({ deleted_at: null }).eq("id", it.id);
     loadItems();
   });
+  toast("휴지통으로 옮겼어요", "되돌리기", undo);
   if (reload) loadItems();
   return true;
 }
@@ -341,7 +391,15 @@ async function restoreItems(items, { reload = true } = {}) {
 
 // 영구 삭제: 저장소 파일 → DB 행 순서로 지움
 async function purgeItems(items) {
-  const paths = items.map((i) => i.file_path).filter(Boolean);
+  const ids0 = new Set(items.map((i) => i.id));
+  let paths = [...new Set(items.map((i) => i.file_path).filter(Boolean))];
+  // 붙여넣기로 만든 복사본이 같은 파일을 공유할 수 있어서, 다른 항목이 쓰는 파일은 지우지 않음
+  for (let k = 0; k < paths.length; k += 200) {
+    const { data, error } = await sb.from("items").select("id, file_path").in("file_path", paths.slice(k, k + 200));
+    if (error) throw error;
+    const shared = new Set(data.filter((r) => !ids0.has(r.id)).map((r) => r.file_path));
+    paths = paths.filter((p) => !shared.has(p));
+  }
   for (let k = 0; k < paths.length; k += 500) {
     const { error } = await sb.storage.from("uploads").remove(paths.slice(k, k + 500));
     if (error) throw error;
@@ -748,9 +806,14 @@ function dropCurrentIfGone(it) {
 $("v-folder").onchange = async (e) => {
   const it = viewer.list[viewer.i];
   const folder_id = e.target.value || null;
+  const prev = it.folder_id;
   const { error } = await sb.from("items").update({ folder_id }).eq("id", it.id);
   if (error) return alert(error.message);
   it.folder_id = folder_id;
+  pushUndo("폴더 이동", async () => {
+    await sb.from("items").update({ folder_id: prev }).eq("id", it.id);
+    loadItems();
+  });
   viewer.dirty = true;
   toast(folder_id ? `'${folderName(folder_id)}'(으)로 옮겼어요` : "폴더에서 뺐어요 · '전체' 맨 위에 있어요");
   e.target.blur(); // 방향키가 다시 사진 넘기기로 동작하도록
@@ -846,9 +909,7 @@ $("sel-move").onchange = async (e) => {
   const folder_id = e.target.value || null;
   e.target.value = "__";
   if (!items.length) return;
-  const { error } = await sb.from("items").update({ folder_id }).in("id", items.map((i) => i.id));
-  if (error) return alert(error.message);
-  toast(folder_id ? `${items.length}개를 '${folderName(folder_id)}'(으)로 옮겼어요` : `${items.length}개를 폴더에서 뺐어요`);
+  await moveItems(items, folder_id);
   setSelecting(false);
   loadItems();
 };
@@ -860,13 +921,7 @@ $("sel-delete").onclick = async () => {
     if (await purgeWithConfirm(items, { reload: false })) { setSelecting(false); loadItems(); }
     return;
   }
-  const ids = items.map((i) => i.id);
-  const { error } = await sb.from("items").update({ deleted_at: new Date().toISOString() }).in("id", ids);
-  if (error) return alert(error.message);
-  toast(`${ids.length}개를 휴지통으로 옮겼어요`, "되돌리기", async () => {
-    await sb.from("items").update({ deleted_at: null }).in("id", ids);
-    loadItems();
-  });
+  if (!(await trashMany(items))) return;
   setSelecting(false);
   loadItems();
 };
@@ -950,3 +1005,133 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { e.preventDefault(); closeComposer(); }
   else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $("composer-form").requestSubmit(); }
 });
+
+// ---------- 되돌리기 (⌘Z) ----------
+const undoStack = [];
+// 되돌릴 동작을 기록하고, 알림의 '되돌리기' 버튼에도 쓸 수 있는 함수를 돌려줌 (한 번만 실행)
+function pushUndo(label, fn) {
+  const entry = { label, fn, used: false };
+  undoStack.push(entry);
+  if (undoStack.length > 30) undoStack.shift();
+  return async () => {
+    if (entry.used) return;
+    entry.used = true;
+    const i = undoStack.indexOf(entry);
+    if (i >= 0) undoStack.splice(i, 1);
+    await fn();
+  };
+}
+async function undoLast() {
+  const entry = undoStack.pop();
+  if (!entry) return toast("되돌릴 작업이 없어요");
+  entry.used = true;
+  try { await entry.fn(); toast(`되돌렸어요 · ${entry.label}`); }
+  catch (e) { alert("되돌리지 못했어요: " + e.message); }
+}
+
+async function trashMany(items) {
+  const ids = items.map((i) => i.id);
+  const { error } = await sb.from("items").update({ deleted_at: new Date().toISOString() }).in("id", ids);
+  if (error) { alert(error.message); return false; }
+  const undo = pushUndo(`${ids.length}개 휴지통으로 이동`, async () => {
+    await sb.from("items").update({ deleted_at: null }).in("id", ids);
+    loadItems();
+  });
+  toast(`${ids.length}개를 휴지통으로 옮겼어요`, "되돌리기", undo);
+  return true;
+}
+
+async function moveItems(items, folder_id) {
+  const { error } = await sb.from("items").update({ folder_id }).in("id", items.map((i) => i.id));
+  if (error) { alert(error.message); return false; }
+  // 원래 폴더별로 묶어서 되돌리기
+  const byPrev = new Map();
+  for (const it of items) {
+    const k = it.folder_id ?? "";
+    if (!byPrev.has(k)) byPrev.set(k, []);
+    byPrev.get(k).push(it.id);
+  }
+  pushUndo(`${items.length}개 폴더 이동`, async () => {
+    for (const [k, ids] of byPrev) await sb.from("items").update({ folder_id: k || null }).in("id", ids);
+    loadItems();
+  });
+  toast(folder_id ? `${items.length}개를 '${folderName(folder_id)}'(으)로 옮겼어요` : `${items.length}개를 폴더에서 뺐어요`);
+  return true;
+}
+
+// ---------- 복사 · 붙여넣기 ----------
+const clipboard = { items: [] };
+
+async function pasteItems() {
+  if (inTrash()) return toast("휴지통에는 붙여넣을 수 없어요");
+  const folder = targetFolder();
+  if (!folder) return toast("붙여넣을 폴더를 사이드바에서 열어 주세요");
+  const rows = clipboard.items.map((it) => ({
+    kind: it.kind, title: it.title, body: it.body, url: it.url, file_path: it.file_path, folder_id: folder,
+  }));
+  const { data, error } = await sb.from("items").insert(rows).select("id");
+  if (error) return alert(error.message);
+  const ids = data.map((r) => r.id);
+  pushUndo(`${ids.length}개 붙여넣기`, async () => {
+    await sb.from("items").delete().in("id", ids); // 복사본만 지움 (파일은 원본이 계속 사용)
+    loadItems();
+  });
+  toast(`${ids.length}개를 '${folderName(folder)}'에 붙여넣었어요`);
+  loadItems();
+}
+
+// ---------- 단축키 (PC): ⌘/Ctrl + X 삭제 · C 복사 · V 붙여넣기 · Z 되돌리기 ----------
+const isTyping = (t) => t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+const shortcutsReady = () =>
+  !!state.user && !isComposerOpen() && !$("library").classList.contains("hidden");
+
+// 단축키 대상: 슬라이드쇼면 지금 사진, 아니면 선택한 항목들
+function shortcutTargets() {
+  if (isViewerOpen()) return viewer.list[viewer.i] ? [viewer.list[viewer.i]] : [];
+  return state.selecting ? selectedItems() : [];
+}
+
+document.addEventListener("keydown", async (e) => {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || isTyping(e.target) || !shortcutsReady()) return;
+  const key = e.key.toLowerCase();
+
+  if (key === "z" && !e.shiftKey) { e.preventDefault(); return undoLast(); }
+
+  if (key === "x") {
+    const items = shortcutTargets();
+    e.preventDefault();
+    if (!items.length) return toast("먼저 항목을 선택해 주세요 (Shift + 클릭)");
+    if (inTrash()) {
+      if (!(await purgeWithConfirm(items, { reload: false }))) return;
+    } else if (!(await trashMany(items))) return;
+    if (isViewerOpen()) { viewer.dirty = true; viewer.list.splice(viewer.i, 1); showSlide(); }
+    else { setSelecting(false); loadItems(); }
+    return;
+  }
+
+  if (key === "c") {
+    if (String(window.getSelection?.() || "").trim()) return; // 글자를 드래그해 둔 경우엔 원래 복사
+    const items = shortcutTargets();
+    if (!items.length || inTrash()) return;
+    e.preventDefault();
+    clipboard.items = items.map((i) => ({ ...i }));
+    toast(`${items.length}개를 복사했어요 · 붙여넣을 폴더를 열고 ⌘V`);
+  }
+});
+
+// ⌘V: 컴퓨터에서 복사한 이미지 → 업로드 / 앱에서 복사한 항목 → 지금 폴더에 붙여넣기
+document.addEventListener("paste", (e) => {
+  if (isTyping(e.target) || !shortcutsReady() || isViewerOpen()) return;
+  const files = [...(e.clipboardData?.files || [])];
+  if (files.length) {
+    e.preventDefault();
+    if (inTrash()) return toast("휴지통에서는 올릴 수 없어요");
+    return uploadFiles(files);
+  }
+  if (clipboard.items.length) { e.preventDefault(); pasteItems(); }
+});
+
+// Windows/Linux에서는 단축키 안내를 Ctrl로 표시
+if (!/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) {
+  for (const n of document.querySelectorAll(".shortcut-hint")) n.textContent = n.textContent.replaceAll("⌘", "Ctrl+");
+}
