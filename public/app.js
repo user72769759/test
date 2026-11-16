@@ -40,6 +40,7 @@ $("auth-form").addEventListener("submit", async (e) => {
   if (authMode === "signup" && !data.session) $("auth-msg").textContent = "확인 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인하세요.";
 });
 $("signout").onclick = () => sb.auth.signOut();
+$("settings-signout").onclick = () => sb.auth.signOut();
 
 sb.auth.onAuthStateChange((_event, session) => {
   state.user = session?.user ?? null;

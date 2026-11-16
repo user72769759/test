@@ -206,3 +206,7 @@ button:disabled { opacity: .5; cursor: default; }
 .node:hover .folder-del, .node .folder-del:focus-visible { opacity: 1; }
 .node .folder-del:hover { background: var(--danger-strong); border-color: var(--danger-strong); }
 @media (hover: none) { .node .folder-del { opacity: 1; } }
+
+/* 계정 설정: 로그인 정보 줄 */
+.account-row { justify-content: space-between; }
+.account-row p { margin: 0; }
