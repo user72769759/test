@@ -227,6 +227,12 @@
     <button id="v-prev" class="v-btn v-prev" aria-label="이전 사진 (←)">‹</button>
     <div class="v-stage">
       <img id="v-img" alt="" />
+      <!-- 음악 -->
+      <div id="v-audio" class="v-audio hidden">
+        <div id="va-title" class="va-title"></div>
+        <div id="va-player"></div>
+        <div class="va-hint small">스페이스 재생·일시정지 · Shift + ←/→ 5초 이동</div>
+      </div>
       <!-- 글: 메모장 모양 그대로 보이고 바로 수정 (자동 저장) -->
       <div id="v-note" class="v-note hidden">
         <input id="vn-title" class="c-title vn-title" placeholder="제목" maxlength="200" autocomplete="off" />

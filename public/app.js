@@ -14,7 +14,10 @@ const folderName = (id) => state.folders.find((f) => f.id === id)?.name;
 // ---------- 공통 ----------
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
-  Object.assign(node, props);
+  for (const [k, v] of Object.entries(props)) {
+    if (k.includes("-")) node.setAttribute(k, v); // aria-label 등은 속성으로
+    else node[k] = v;
+  }
   for (const c of children) if (c != null) node.append(c);
   return node;
 }
@@ -302,7 +305,7 @@ function renderItems(items, urls) {
     let media = null;
     if (it.kind === "image" && src) media = el("img", { src, alt: it.title, loading: "lazy" });
     if (it.kind === "video" && src) media = el("video", { src, controls: true, preload: "metadata" });
-    if (it.kind === "audio" && src) media = el("audio", { src, controls: true });
+    if (it.kind === "audio" && src) media = buildAudioPlayer(src, { compact: true });
 
     let titleNode = el("div", { className: "title", textContent: it.title || "(제목 없음)" });
     const href = it.kind === "link" ? it.url : it.kind === "file" ? src : null;
@@ -321,9 +324,10 @@ function renderItems(items, urls) {
       : btn("삭제", () => moveToTrash(it));
     // 사진: 정사각형에 꽉 채우고, 파일명·정보는 마우스를 올리면(모바일은 탭하면) 위에 표시
     const isPhoto = it.kind === "image" && src;
+    const isAudio = it.kind === "audio" && src;
     const unsorted = state.current === null && !it.folder_id;
     const card = el("article", {
-      className: "item" + (isPhoto ? " photo" : "") + (unsorted ? " unsorted" : "") + (state.selected.has(it.id) ? " selected" : ""),
+      className: "item" + (isPhoto ? " photo" : "") + (isAudio ? " audio-card" : "") + (unsorted ? " unsorted" : "") + (state.selected.has(it.id) ? " selected" : ""),
       tabIndex: isPhoto ? 0 : -1,
     },
       el("span", { className: "check", "aria-hidden": "true", textContent: "✓" }),
@@ -341,13 +345,13 @@ function renderItems(items, urls) {
       // PC: Shift + 클릭 → 선택 모드를 켜고 이 항목 선택
       if (e.shiftKey && !state.selecting) { e.preventDefault(); setSelecting(true); }
       if (state.selecting) { e.preventDefault(); toggleSelect(it.id, card); return; }
-      if ((isPhoto || isNote(it)) && !e.target.closest("a, button")) openViewer(it.id);
+      if ((isPhoto || isNote(it) || isAudio) && !e.target.closest("a, button, input, .ap")) openViewer(it.id);
     };
     card.onkeydown = (e) => {
       if (e.key !== "Enter" && e.key !== " ") return;
       e.preventDefault();
       if (state.selecting) toggleSelect(it.id, card);
-      else if (isPhoto || isNote(it)) openViewer(it.id);
+      else if (isPhoto || isNote(it) || isAudio) openViewer(it.id);
     };
     grid.append(card);
   }
@@ -731,7 +735,7 @@ function folderOptions() {
 }
 
 function openViewer(id) {
-  viewer.list = state.items.filter((i) => (i.kind === "image" && state.urls[i.file_path]) || isNote(i));
+  viewer.list = state.items.filter((i) => ((i.kind === "image" || i.kind === "audio") && state.urls[i.file_path]) || isNote(i));
   viewer.i = Math.max(0, viewer.list.findIndex((x) => x.id === id));
   viewer.dirty = false;
   $("viewer").classList.remove("hidden");
@@ -746,6 +750,7 @@ function openViewer(id) {
 
 function closeViewer() {
   flushNoteSave();
+  stopViewerAudio();
   $("viewer").classList.add("hidden");
   $("v-img").removeAttribute("src");
   document.body.style.overflow = "";
@@ -759,9 +764,16 @@ function showSlide() {
   viewer.i = Math.min(Math.max(viewer.i, 0), viewer.list.length - 1);
   const it = viewer.list[viewer.i];
   const note = isNote(it);
-  $("v-img").classList.toggle("hidden", note);
+  const audio = it.kind === "audio";
+  stopViewerAudio();
+  $("v-img").classList.toggle("hidden", note || audio);
   $("v-note").classList.toggle("hidden", !note);
-  if (note) {
+  $("v-audio").classList.toggle("hidden", !audio);
+  if (audio) {
+    $("v-img").removeAttribute("src");
+    $("va-title").textContent = it.title || "음악";
+    $("va-player").replaceChildren(buildAudioPlayer(state.urls[it.file_path], { autofocus: true }));
+  } else if (note) {
     $("v-img").removeAttribute("src");
     $("vn-title").value = it.title || "";
     $("vn-body").value = it.body || "";
@@ -772,7 +784,7 @@ function showSlide() {
     $("v-img").src = state.urls[it.file_path];
     $("v-img").alt = it.title;
   }
-  $("v-title").textContent = note ? (it.title || "글") : (it.title || "(제목 없음)");
+  $("v-title").textContent = note ? (it.title || "글") : (it.title || (audio ? "음악" : "(제목 없음)"));
   $("v-sub").textContent = `${viewer.i + 1} / ${viewer.list.length} · ${new Date(it.created_at).toLocaleDateString("ko-KR")}`;
   $("v-folder-label").textContent = folderName(it.folder_id) ?? "정리 안 됨";
   $("v-prev").disabled = viewer.i === 0;
@@ -780,7 +792,7 @@ function showSlide() {
   // 앞뒤 사진 미리 불러오기
   for (const j of [viewer.i - 1, viewer.i + 1]) {
     const n = viewer.list[j];
-    if (n && !isNote(n)) new Image().src = state.urls[n.file_path];
+    if (n && n.kind === "image") new Image().src = state.urls[n.file_path];
   }
 }
 
@@ -839,6 +851,12 @@ $("v-restore").onclick = async () => {
 
 document.addEventListener("keydown", (e) => {
   if (!isViewerOpen() || isFolderMenuOpen() || isTyping(e.target)) return;
+  const a = $("va-player").querySelector("audio");
+  const onAudio = a && !$("v-audio").classList.contains("hidden");
+  if (onAudio && (e.key === " " || e.key === "k")) { e.preventDefault(); a.paused ? a.play() : a.pause(); return; }
+  if (onAudio && e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+    e.preventDefault(); a.currentTime = Math.max(0, a.currentTime + (e.key === "ArrowLeft" ? -5 : 5)); return;
+  }
   if (e.key === "ArrowLeft") { e.preventDefault(); step(-1); }
   else if (e.key === "ArrowRight") { e.preventDefault(); step(1); }
   else if (e.key === "Escape") closeViewer();
@@ -1259,4 +1277,61 @@ for (const id of ["vn-title", "vn-body"]) {
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); e.target.blur(); } // 첫 Esc는 글쓰기만 멈춤
     if (e.key === "Enter" && e.target.id === "vn-title") { e.preventDefault(); $("vn-body").focus(); }
   });
+}
+
+// ---------- 음악 플레이어 (카드·슬라이드쇼 공용, 테마 적용) ----------
+const fmtTime = (t) => {
+  if (!isFinite(t)) return "--:--";
+  const m = Math.floor(t / 60), sec = Math.floor(t % 60);
+  return `${m}:${String(sec).padStart(2, "0")}`;
+};
+
+function buildAudioPlayer(src, { compact = false, autofocus = false } = {}) {
+  const audio = el("audio", { src, preload: "metadata" });
+  const playBtn = el("button", { type: "button", className: "ap-play", "aria-label": "재생" });
+  const seek = el("input", { type: "range", className: "ap-seek", min: 0, max: 1000, value: 0, step: 1, "aria-label": "재생 위치" });
+  const cur = el("span", { className: "ap-time", textContent: "0:00" });
+  const dur = el("span", { className: "ap-time", textContent: "--:--" });
+  const wrap = el("div", { className: "ap" + (compact ? " ap-compact" : "") },
+    audio,
+    el("div", { className: "ap-disc", "aria-hidden": "true" }, el("span", { textContent: "♪" })),
+    el("div", { className: "ap-controls" }, playBtn,
+      el("div", { className: "ap-bar" }, seek, el("div", { className: "ap-times" }, cur, dur))));
+
+  let dragging = false;
+  const paint = () => {
+    const p = audio.duration ? audio.currentTime / audio.duration : 0;
+    if (!dragging) seek.value = Math.round(p * 1000);
+    seek.style.setProperty("--p", (seek.value / 10) + "%");
+    cur.textContent = fmtTime(dragging ? (seek.value / 1000) * (audio.duration || 0) : audio.currentTime);
+  };
+  const setPlaying = (on) => {
+    wrap.classList.toggle("playing", on);
+    playBtn.setAttribute("aria-label", on ? "일시정지" : "재생");
+  };
+  audio.addEventListener("loadedmetadata", () => { dur.textContent = fmtTime(audio.duration); paint(); });
+  audio.addEventListener("timeupdate", paint);
+  audio.addEventListener("play", () => {
+    // 한 번에 하나만 재생
+    for (const other of document.querySelectorAll(".ap audio")) if (other !== audio) other.pause();
+    setPlaying(true);
+  });
+  audio.addEventListener("pause", () => setPlaying(false));
+  audio.addEventListener("ended", () => { setPlaying(false); audio.currentTime = 0; paint(); });
+
+  playBtn.onclick = (e) => { e.stopPropagation(); audio.paused ? audio.play() : audio.pause(); };
+  seek.addEventListener("input", () => { dragging = true; paint(); });
+  seek.addEventListener("change", () => {
+    if (audio.duration) audio.currentTime = (seek.value / 1000) * audio.duration;
+    dragging = false; paint();
+  });
+  for (const ev of ["click", "pointerdown", "keydown"]) seek.addEventListener(ev, (e) => e.stopPropagation());
+  if (autofocus) setTimeout(() => playBtn.focus(), 50);
+  return wrap;
+}
+
+function stopViewerAudio() {
+  const a = $("va-player")?.querySelector("audio");
+  if (a) { a.pause(); a.removeAttribute("src"); a.load(); }
+  $("va-player")?.replaceChildren();
 }
