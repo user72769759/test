@@ -520,3 +520,9 @@ kbd {
 
 /* 저장 버튼 */
 .v-save { white-space: nowrap; }
+
+/* 슬라이드쇼 저장 버튼: 어두운 막대 위에서 밝은 종이색 */
+.v-bar .v-save, .v-bar button.v-save.ghost {
+  background: #fbf6ec !important; color: #3a2a1f !important; border: 1px solid #fbf6ec !important; font-weight: 700;
+}
+.v-bar .v-save:hover, .v-bar button.v-save.ghost:hover { background: #ffffff !important; border-color: #ffffff !important; }
