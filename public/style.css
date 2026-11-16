@@ -475,3 +475,13 @@ button, .btn { white-space: nowrap; flex-shrink: 0; }
 
 /* 슬라이드쇼의 영상 */
 .v-video { max-width: 100%; max-height: 100%; border-radius: 6px; background: #000; box-shadow: 0 20px 50px rgba(0, 0, 0, .4); outline: none; }
+
+/* 사이드바: 프로필을 맨 아래가 아니라 휴지통 바로 아래에 붙임.
+   PC에서는 사이드바가 화면에 고정되어 스크롤해도 폴더·프로필이 보임 */
+#tree { flex: 0 1 auto; }
+.sidebar-foot { margin-top: 0; }
+@media (min-width: 721px) {
+  .sidebar { position: sticky; top: 0; align-self: start; height: auto; max-height: 100vh; overflow-y: auto; }
+  .app { align-items: start; }
+  .main { min-height: 100vh; }
+}
