@@ -485,3 +485,8 @@ button, .btn { white-space: nowrap; flex-shrink: 0; }
   .app { align-items: start; }
   .main { min-height: 100vh; }
 }
+
+/* 사이드바 색 영역은 페이지 끝까지 항상 이어지게 (스크롤·화면 길이와 무관) */
+@media (min-width: 721px) {
+  .app { background: linear-gradient(90deg, var(--panel) 240px, var(--line) 240px, var(--line) 241px, transparent 241px); }
+}

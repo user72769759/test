@@ -139,7 +139,11 @@ function renderTree() {
     del.onclick = (e) => { e.stopPropagation(); deleteFolder(f); };
     const node = el("div", { className: "node" + (state.current === f.id ? " active" : "") }, el("span", { className: "node-name", textContent: f.name }), del);
     node.dataset.key = f.id;
-    node.onclick = (e) => { if (e.target.tagName !== "INPUT" && state.current !== f.id) select(f.id); };
+    node.onclick = (e) => {
+      if (e.target.tagName === "INPUT") return;
+      // 계정 설정이 열려 있으면 닫고 이 폴더로
+      if (state.current !== f.id || isSettingsOpen()) select(f.id);
+    };
     // PC: 폴더 이름 더블클릭 → 이름 바꾸기 (Enter 저장, Esc 취소)
     node.querySelector(".node-name").ondblclick = (e) => { e.stopPropagation(); startRename(f, e.currentTarget); };
     tree.append(node);
@@ -196,7 +200,10 @@ async function deleteFolder(f) {
   else { renderTree(); loadItems(); }
 }
 
+const isSettingsOpen = () => !$("settings").classList.contains("hidden");
+
 function select(id) {
+  if (isSettingsOpen()) showSettings(false); // 사이드바를 누르면 계정 설정을 닫고 그 화면으로
   state.current = id;
   setSelecting(false);
   $("lib-actions").classList.toggle("hidden", inTrash());
