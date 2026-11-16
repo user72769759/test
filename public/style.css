@@ -210,3 +210,7 @@ button:disabled { opacity: .5; cursor: default; }
 /* 계정 설정: 로그인 정보 줄 */
 .account-row { justify-content: space-between; }
 .account-row p { margin: 0; }
+
+/* 버튼 글자가 두 줄로 꺾이지 않게, 입력칸이 남는 폭을 차지 */
+button, .btn { white-space: nowrap; flex-shrink: 0; }
+.panel .row input { flex: 1; min-width: 0; }
