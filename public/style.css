@@ -503,7 +503,7 @@ button, .btn { white-space: nowrap; flex-shrink: 0; }
 }
 .help .panel h2 { margin-bottom: 2px; }
 .help-list { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; line-height: 1.6; }
-.help-tag { font-size: 12px; background: var(--accent); color: var(--field); padding: 1px 7px; border-radius: 999px; }
+.help-tag { white-space: nowrap; font-size: 12px; background: var(--accent); color: var(--field); padding: 1px 7px; border-radius: 999px; }
 .keys { display: grid; grid-template-columns: max-content 1fr; gap: 9px 18px; margin: 0; font-size: 14px; align-items: baseline; }
 .keys dt { white-space: nowrap; color: var(--text); }
 .keys dd { margin: 0; color: var(--muted); }
