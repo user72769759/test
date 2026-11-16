@@ -517,3 +517,6 @@ kbd {
   .keys { grid-template-columns: 1fr; gap: 2px; }
   .keys dd { margin-bottom: 8px; }
 }
+
+/* 저장 버튼 */
+.v-save { white-space: nowrap; }

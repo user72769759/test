@@ -933,7 +933,7 @@ function updateSelectBar() {
   const all = state.items.length > 0 && n === state.items.length;
   $("sel-count").textContent = `${n}개 선택`;
   $("sel-all").textContent = all ? "선택 해제" : "모두 선택";
-  for (const id of ["sel-move", "sel-restore", "sel-delete"]) $(id).disabled = n === 0;
+  for (const id of ["sel-move", "sel-restore", "sel-delete", "sel-save"]) $(id).disabled = n === 0;
 }
 
 const selectedItems = () => state.items.filter((i) => state.selected.has(i.id));
@@ -1407,4 +1407,100 @@ $("sort-btn").onclick = (e) => {
   folderMenuAnchor = anchor;
   anchor.setAttribute("aria-expanded", "true");
   (menu.querySelector(".fm-item.current") || menu.querySelector(".fm-item")).focus();
+};
+
+// ---------- 저장 (다운로드) ----------
+// 1개: 그 파일 그대로 / 여러 개: ZIP 하나로 묶어서 (브라우저가 연속 다운로드를 막는 걸 피함)
+const safeName = (n) => String(n || "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").trim().slice(0, 120);
+
+function fileNameFor(it) {
+  if (isNote(it)) return (safeName(it.title) || "글") + ".txt";
+  const ext = (it.file_path?.split(".").pop() || "").toLowerCase();
+  let name = safeName(it.title) || "파일";
+  if (ext && !name.toLowerCase().endsWith("." + ext)) name = name.replace(/\.[a-z0-9]{1,5}$/i, "") + "." + ext;
+  return name;
+}
+const noteText = (it) => [it.title, it.body].filter(Boolean).join("\n\n");
+
+function saveBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+async function downloadItems(items) {
+  items = items.filter((it) => isNote(it) || it.file_path);
+  if (!items.length) return toast("저장할 수 있는 항목이 없어요");
+
+  // 1개: 바로 받기
+  if (items.length === 1) {
+    const it = items[0];
+    if (isNote(it)) return saveBlob(new Blob([noteText(it)], { type: "text/plain;charset=utf-8" }), fileNameFor(it));
+    const { data, error } = await sb.storage.from("uploads").createSignedUrl(it.file_path, 120, { download: fileNameFor(it) });
+    if (error) return alert("저장하지 못했어요: " + error.message);
+    const a = el("a", { href: data.signedUrl });
+    document.body.append(a);
+    a.click(); // 서버가 '다운로드'로 응답해서 페이지는 그대로 있음
+    a.remove();
+    return toast("저장을 시작했어요");
+  }
+
+  // 여러 개: ZIP으로
+  try {
+    progress.show("저장 준비 중…", "", 0);
+    const { zipSync } = await import("https://esm.sh/fflate@0.8.2");
+    const paths = items.filter((i) => i.file_path).map((i) => i.file_path);
+    const urls = {};
+    for (let k = 0; k < paths.length; k += 100) {
+      const { data, error } = await sb.storage.from("uploads").createSignedUrls(paths.slice(k, k + 100), 600);
+      if (error) throw error;
+      for (const d of data) urls[d.path] = d.signedUrl;
+    }
+    const files = {};
+    const used = new Set();
+    const enc = new TextEncoder();
+    let failed = 0;
+    for (const [n, it] of items.entries()) {
+      progress.show(`저장 준비 중 ${n + 1}/${items.length}`, it.title || "", n / items.length);
+      let name = fileNameFor(it);
+      for (let k = 2; used.has(name.toLowerCase()); k++) name = fileNameFor(it).replace(/(\.[^.]+)?$/, ` (${k})$1`);
+      used.add(name.toLowerCase());
+      try {
+        if (isNote(it)) files[name] = enc.encode(noteText(it));
+        else {
+          const res = await fetch(urls[it.file_path]);
+          if (!res.ok) throw new Error(res.status);
+          files[name] = [new Uint8Array(await res.arrayBuffer()), { level: 0 }]; // 사진·영상은 이미 압축돼 있어서 그대로 담음
+        }
+      } catch (e) { console.error(e); failed++; }
+    }
+    progress.show("ZIP 파일 만드는 중…", "", null);
+    const zip = zipSync(files, { level: 0 });
+    const d = new Date();
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+    const where = state.current && state.current !== "trash" ? safeName(folderName(state.current)) : "전체";
+    saveBlob(new Blob([zip], { type: "application/zip" }), `humane-archive_${where}_${stamp}.zip`);
+    progress.done(failed ? `${items.length - failed}개 저장 · ${failed}개는 받지 못했어요` : `${items.length}개를 ZIP 파일로 저장했어요`, !!failed);
+  } catch (e) {
+    console.error(e);
+    progress.done("저장하지 못했어요: " + e.message, true);
+  }
+}
+
+$("sel-save").onclick = async () => {
+  const items = selectedItems();
+  if (!items.length) return;
+  $("sel-save").disabled = true;
+  try { await downloadItems(items); } finally { $("sel-save").disabled = false; }
+};
+$("v-save").onclick = () => {
+  const it = viewer.list[viewer.i];
+  if (!it) return;
+  flushNoteSave();
+  // 글은 지금 화면에 적힌 내용 그대로 저장
+  if (isNote(it)) downloadItems([{ ...it, title: $("vn-title").value, body: $("vn-body").value }]);
+  else downloadItems([it]);
 };
