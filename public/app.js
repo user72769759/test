@@ -26,18 +26,73 @@ function kindFromMime(mime) {
 }
 const KIND_LABEL = { note: "글", image: "사진", video: "영상", audio: "음악", link: "링크", file: "파일" };
 
-// ---------- 인증 ----------
-let authMode = "signin";
-$("auth-form").addEventListener("click", (e) => { if (e.target.dataset.mode) authMode = e.target.dataset.mode; });
-$("auth-form").addEventListener("submit", async (e) => {
+// ---------- 인증 (로그인 · 회원가입) ----------
+// Supabase 오류 문구를 친절한 한국어로
+function authErrorText(error) {
+  const m = (error?.message || "").toLowerCase();
+  if (m.includes("invalid login credentials")) return "이메일 또는 비밀번호가 맞지 않아요.";
+  if (m.includes("email not confirmed")) return "메일함에서 인증 링크를 먼저 눌러 주세요.";
+  if (m.includes("already registered") || m.includes("already been registered")) return "이미 가입된 이메일이에요. 로그인해 주세요.";
+  if (m.includes("password should be") || m.includes("at least 6")) return "비밀번호는 6자 이상이어야 해요.";
+  if (m.includes("invalid") && m.includes("email")) return "이메일 주소를 다시 확인해 주세요.";
+  if (m.includes("rate limit") || m.includes("too many") || error?.status === 429) return "요청이 많아요. 잠시 후 다시 시도해 주세요.";
+  return "문제가 생겼어요. 잠시 후 다시 시도해 주세요. (" + (error?.message || "알 수 없는 오류") + ")";
+}
+const isEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+
+function showAuthPane(name) {
+  for (const id of ["signin-form", "signup-form", "signup-done"]) $(id).classList.toggle("hidden", id !== name);
+  $("signin-msg").textContent = $("signup-msg").textContent = "";
+  const first = { "signin-form": "email", "signup-form": "su-email" }[name];
+  if (first) setTimeout(() => $(first).focus(), 0);
+}
+$("to-signup").onclick = () => { $("su-email").value = $("email").value.trim(); showAuthPane("signup-form"); };
+$("to-signin").onclick = () => { if ($("su-email").value) $("email").value = $("su-email").value.trim(); showAuthPane("signin-form"); };
+$("done-to-signin").onclick = () => showAuthPane("signin-form");
+
+async function withBusy(form, label, fn) {
+  const btn = form.querySelector(".auth-submit");
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = label;
+  try { await fn(); } finally { btn.disabled = false; btn.textContent = old; }
+}
+
+$("signin-form").addEventListener("submit", (e) => {
   e.preventDefault();
   const email = $("email").value.trim(), password = $("password").value;
-  $("auth-msg").textContent = "처리 중…";
-  const { data, error } = authMode === "signup"
-    ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin } })
-    : await sb.auth.signInWithPassword({ email, password });
-  if (error) return ($("auth-msg").textContent = error.message);
-  if (authMode === "signup" && !data.session) $("auth-msg").textContent = "확인 메일을 보냈어요. 메일의 링크를 누른 뒤 로그인하세요.";
+  const msg = $("signin-msg");
+  if (!isEmail(email)) return (msg.textContent = "이메일을 입력해 주세요.", $("email").focus());
+  if (!password) return (msg.textContent = "비밀번호를 입력해 주세요.", $("password").focus());
+  msg.textContent = "";
+  withBusy(e.currentTarget, "로그인 중…", async () => {
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if (error) msg.textContent = authErrorText(error);
+  });
+});
+
+$("signup-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const email = $("su-email").value.trim();
+  const pw = $("su-password").value, pw2 = $("su-password2").value;
+  const msg = $("signup-msg");
+  if (!isEmail(email)) return (msg.textContent = "이메일을 정확히 입력해 주세요.", $("su-email").focus());
+  if (pw.length < 6) return (msg.textContent = "비밀번호는 6자 이상으로 입력해 주세요.", $("su-password").focus());
+  if (pw !== pw2) return (msg.textContent = "두 비밀번호가 서로 달라요. 다시 확인해 주세요.", $("su-password2").focus());
+  msg.textContent = "";
+  withBusy(e.currentTarget, "가입하는 중…", async () => {
+    const { data, error } = await sb.auth.signUp({ email, password: pw, options: { emailRedirectTo: location.origin } });
+    if (error) return (msg.textContent = authErrorText(error));
+    // 이미 가입된 이메일이면 Supabase는 identities가 빈 사용자를 돌려줌
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      return (msg.textContent = "이미 가입된 이메일이에요. 로그인해 주세요.");
+    }
+    if (data.session) return; // 메일 확인이 꺼져 있으면 바로 로그인됨
+    $("done-email").textContent = email;
+    $("email").value = email;
+    $("su-password").value = $("su-password2").value = "";
+    showAuthPane("signup-done");
+  });
 });
 $("signout").onclick = () => sb.auth.signOut();
 $("settings-signout").onclick = () => sb.auth.signOut();
